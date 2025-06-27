@@ -1,0 +1,31 @@
+
+name: AliveWater Monitor
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # Запуск каждые 5 минут
+  workflow_dispatch:       # Разрешить ручной запуск
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-driver
+          pip install selenium webdriver-manager telebot
+          
+      - name: Run monitoring
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          LOGIN: ${{ secrets.LOGIN }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+        run: python monitor.py
