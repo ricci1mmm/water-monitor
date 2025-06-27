@@ -19,13 +19,21 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-driver
+          sudo apt-get install -y chromium-driver sqlite3
           pip install selenium webdriver-manager telebot
           
       - name: Run monitoring
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          SUBSCRIBERS: ${{ secrets.SUBSCRIBERS }}
           LOGIN: ${{ secrets.LOGIN }}
           PASSWORD: ${{ secrets.PASSWORD }}
-        run: python monitor.py
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          python monitor.py
+          
+      - name: Upload database backup
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: subscribers-db-backup
+          path: subscribers.db
