@@ -25,7 +25,7 @@ jobs:
       - name: Run monitoring
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          SUBSCRIBERS: ${{ secrets.SUBSCRIBERS }}
           LOGIN: ${{ secrets.LOGIN }}
           PASSWORD: ${{ secrets.PASSWORD }}
         run: python monitor.py
