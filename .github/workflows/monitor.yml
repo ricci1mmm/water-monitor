@@ -1,4 +1,3 @@
-
 name: AliveWater Monitor
 on:
   schedule:
@@ -9,19 +8,32 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
+      # Шаг 1: Получение кода
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Шаг 2: Восстановление базы данных (если есть бэкап)
+      - name: Restore database backup
+        uses: actions/download-artifact@v4
+        with:
+          name: subscribers-db-backup
+          path: .
+        continue-on-error: true  # Продолжать, если бэкапа нет
+
+      # Шаг 3: Настройка Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+
+      # Шаг 4: Установка зависимостей
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium-driver sqlite3
           pip install selenium webdriver-manager telebot
-          
+
+      # Шаг 5: Запуск мониторинга
       - name: Run monitoring
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -30,10 +42,25 @@ jobs:
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: |
           python monitor.py
-          
+
+      # Шаг 6: Создание резервной копии базы данных
+      - name: Create database backup
+        if: always()
+        run: |
+          sqlite3 subscribers.db ".backup subscribers.backup.db"
+          ls -la  # Для отладки
+
+      # Шаг 7: Сохранение резервной копии
       - name: Upload database backup
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: subscribers-db-backup
-          path: subscribers.db
+          path: subscribers.backup.db
+          retention-days: 7  # Хранить бэкапы 7 дней
+
+      # Шаг 8: Очистка (опционально)
+      - name: Clean up
+        if: always()
+        run: |
+          rm -f subscribers.backup.db
