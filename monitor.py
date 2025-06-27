@@ -20,15 +20,17 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 
-# Конфигурация из переменных окружения
+# Конфигурация
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
 BASE_URL = 'https://my.alivewater.cloud/'
 LOGIN = os.getenv('LOGIN')
 PASSWORD = os.getenv('PASSWORD')
 CHECK_INTERVAL = 60
 MAX_WAIT = 30
 MAX_LOGIN_ATTEMPTS = 3
+
+# Получаем список подписчиков из переменной окружения
+SUBSCRIBERS = list(map(int, os.getenv('SUBSCRIBERS').split(',')))
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -178,12 +180,13 @@ class AliveWaterMonitor:
             self.send_notification("🔴 Не удалось проверить состояние терминалов")
 
     def send_notification(self, message):
-        """Отправка уведомления в Telegram"""
-        try:
-            bot.send_message(CHAT_ID, message)
-            logging.info(f"Уведомление отправлено: {message[:50]}...")
-        except Exception as e:
-            logging.error(f"Ошибка отправки уведомления: {e}")
+        """Отправка уведомления всем подписчикам"""
+        for chat_id in SUBSCRIBERS:
+            try:
+                bot.send_message(chat_id, message)
+                logging.info(f"Уведомление отправлено в чат {chat_id}")
+            except Exception as e:
+                logging.error(f"Ошибка отправки в чат {chat_id}: {e}")
 
     def run(self):
         """Основной цикл мониторинга"""
