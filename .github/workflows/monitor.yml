@@ -10,28 +10,34 @@ jobs:
     timeout-minutes: 10
     
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate token
+        run: |
+          if [[ -z "${{ secrets.BOT_TOKEN }}" || "${{ secrets.BOT_TOKEN }}" != *:* ]]; then
+            echo "::error::Invalid BOT_TOKEN format! Should be like 123456789:ABCdef..."
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
+          sudo apt-get install -y chromium-chromedriver
           pip install selenium webdriver-manager telebot python-dotenv
-          
-      - name: Create .env
+
+      - name: Create .env file
         run: |
           echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
           echo "LOGIN=${{ secrets.LOGIN }}" >> .env
           echo "PASSWORD=${{ secrets.PASSWORD }}" >> .env
           [ -n "${{ secrets.ADMIN_CHAT_ID }}" ] && echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
-          
+
       - name: Run monitor
         run: |
-          # Временное отключение headless для диагностики
-          sed -i 's/# options.add_argument("--headless=new")/options.add_argument("--headless=new")/' monitor.py
           python monitor.py
