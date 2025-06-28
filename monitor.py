@@ -76,20 +76,26 @@ class AliveWaterMonitor:
         try:
             self.driver.get(urljoin(BASE_URL, 'login'))
             
+            # Ожидание загрузки страницы
             WebDriverWait(self.driver, MAX_WAIT).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
             
+            # Закрытие всплывающего окна (если есть)
             try:
                 popup = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content")))
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content"))
+                )
                 close_btn = popup.find_element(By.CSS_SELECTOR, "button.ant-btn-primary")
                 self.driver.execute_script("arguments[0].click();", close_btn)
                 logging.info("Всплывающее окно закрыто")
             except Exception:
                 logging.info("Всплывающее окно не найдено")
             
+            # Ввод учетных данных
             login_field = WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='login']")))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='login']"))
+            )
             login_field.clear()
             login_field.send_keys(LOGIN)
             
@@ -97,12 +103,16 @@ class AliveWaterMonitor:
             password_field.clear()
             password_field.send_keys(PASSWORD)
             
+            # Нажатие кнопки входа
             submit_btn = WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+            )
             submit_btn.click()
             
+            # Проверка успешного входа
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "span._container_iuuwv_1")))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "span._container_iuuwv_1"))
+            )
             logging.info("Авторизация успешна")
             return True
             
@@ -132,53 +142,54 @@ class AliveWaterMonitor:
             logging.warning(f"Ошибка определения метода оплаты: {e}")
             return "Неизвестно"
 
- def check_sales(self):
-    """Проверка новых продаж"""
-    try:
-        self.driver.get(urljoin(BASE_URL, 'sales'))
-        WebDriverWait(self.driver, MAX_WAIT).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
-        )
-        
-        rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
-        if not rows:
-            logging.info("Нет данных о продажах")
-            return
-
-        first_row = rows[0]
-        cells = first_row.find_elements(By.TAG_NAME, "td")
-        
-        if len(cells) >= 6:
-            sale_data = {
-                'number': cells[0].text.strip(),
-                'address': cells[1].text.strip(),
-                'time': cells[2].text.strip(),
-                'liters': cells[3].text.strip(),
-                'total': cells[4].text.strip(),
-                'payment': self.get_payment_method(cells[5])
-            }
+    def check_sales(self):
+        """Проверка новых продаж"""
+        try:
+            self.driver.get(urljoin(BASE_URL, 'sales'))
+            WebDriverWait(self.driver, MAX_WAIT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
+            )
             
-            if not self.state['last_sale'] or sale_data['number'] != self.state['last_sale']['number']:
-                self.state['last_sale'] = sale_data
-                self.save_state()
-                self.send_notification(
-                    f"💰 Новая продажа #{sale_data['number']}\n"
-                    f"🏠 Адрес: {sale_data['address']}\n"
-                    f"⏰ Время: {sale_data['time']}\n"
-                    f"⚖️ Объем: {sale_data['liters']}\n"
-                    f"💵 Сумма: {sale_data['total']}\n"
-                    f"💳 Способ оплаты: {sale_data['payment']}"
-                )
-    except Exception as e:
-        logging.error(f"Ошибка проверки продаж: {e}")
-        self.send_notification(f"🔴 Ошибка проверки продаж: {str(e)[:200]}")
+            rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
+            if not rows:
+                logging.info("Нет данных о продажах")
+                return
+
+            first_row = rows[0]
+            cells = first_row.find_elements(By.TAG_NAME, "td")
+            
+            if len(cells) >= 6:
+                sale_data = {
+                    'number': cells[0].text.strip(),
+                    'address': cells[1].text.strip(),
+                    'time': cells[2].text.strip(),
+                    'liters': cells[3].text.strip(),
+                    'total': cells[4].text.strip(),
+                    'payment': self.get_payment_method(cells[5])
+                }
+                
+                if not self.state['last_sale'] or sale_data['number'] != self.state['last_sale']['number']:
+                    self.state['last_sale'] = sale_data
+                    self.save_state()
+                    self.send_notification(
+                        f"💰 Новая продажа #{sale_data['number']}\n"
+                        f"🏠 Адрес: {sale_data['address']}\n"
+                        f"⏰ Время: {sale_data['time']}\n"
+                        f"⚖️ Объем: {sale_data['liters']}\n"
+                        f"💵 Сумма: {sale_data['total']}\n"
+                        f"💳 Способ оплаты: {sale_data['payment']}"
+                    )
+        except Exception as e:
+            logging.error(f"Ошибка проверки продаж: {e}")
+            self.send_notification(f"🔴 Ошибка проверки продаж: {str(e)[:200]}")
 
     def check_terminals(self):
         """Проверка состояния терминалов"""
         try:
             self.driver.get(urljoin(BASE_URL, 'terminals'))
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1")))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
+            )
             
             problem_terminals = self.driver.find_elements(By.CSS_SELECTOR, "tr._hasProblem_1gunj_20")
             for terminal in problem_terminals:
