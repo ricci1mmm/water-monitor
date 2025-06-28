@@ -1,7 +1,7 @@
 name: AliveWater Monitor
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Каждые 5 минут
+    - cron: '*/5 * * * *'  # Проверка каждые 5 минут
   workflow_dispatch:
 
 jobs:
@@ -17,14 +17,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium-chromedriver
-
-      - name: Install Python packages
-        run: |
-          python -m pip install --upgrade pip
           pip install selenium webdriver-manager telebot python-dotenv
 
       - name: Create .env file
@@ -32,8 +28,8 @@ jobs:
           echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
           echo "LOGIN=${{ secrets.LOGIN }}" >> .env
           echo "PASSWORD=${{ secrets.PASSWORD }}" >> .env
-          echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
+          [ -n "${{ secrets.ADMIN_CHAT_ID }}" ] && echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
 
-      - name: Run monitoring
+      - name: Run monitor
         run: |
           python monitor.py
