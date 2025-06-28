@@ -13,6 +13,9 @@ import telebot
 from urllib.parse import urljoin
 from webdriver_manager.chrome import ChromeDriverManager
 
+
+
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +34,58 @@ MAX_WAIT = 30
 bot = telebot.TeleBot(BOT_TOKEN)
 
 class AliveWaterMonitor:
+
+    import json
+from datetime import datetime
+
+# Файл для хранения данных
+DATA_FILE = 'water_data.json'
+
+def load_data():
+    try:
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {'last_purchase': None, 'history': []}
+
+def save_data(data):
+    with open(DATA_FILE, 'w') as f:
+        json.dump(data, f)
+
+def main():
+    data = load_data()
+    
+    print("1 - Новая покупка воды")
+    print("2 - Просмотр истории")
+    print("3 - Выход")
+    
+    choice = input("Выберите действие: ")
+    
+    if choice == "1":
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        data['last_purchase'] = now
+        data['history'].append(now)
+        save_data(data)
+        print(f"Покупка воды зарегистрирована: {now}")
+    
+    elif choice == "2":
+        if not data['history']:
+            print("История покупок пуста")
+        else:
+            print("История покупок:")
+            for purchase in data['history']:
+                print(purchase)
+    
+    elif choice == "3":
+        print("Выход")
+    
+    else:
+        print("Неверный выбор")
+
+if __name__ == "__main__":
+    main()
+
+    
     def __init__(self):
         self.driver = None
         self.last_sale = None
