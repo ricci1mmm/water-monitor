@@ -44,7 +44,6 @@ class AliveWaterMonitor:
         try:
             with open(DATA_FILE, 'r') as f:
                 state = json.load(f)
-                # Конвертация старого формата
                 if 'last_problems' not in state:
                     state['last_problems'] = {}
                 return state
@@ -100,9 +99,10 @@ class AliveWaterMonitor:
             password_field.clear()
             password_field.send_keys(PASSWORD)
             
-            # Нажатие кнопки входа
+            # Нажатие кнопки входа (исправленная строка)
             submit_btn = WebDriverWait(self.driver, MAX_WAIT).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+            )
             submit_btn.click()
             
             # Проверка успешного входа
@@ -122,7 +122,6 @@ class AliveWaterMonitor:
         try:
             for _ in range(3):
                 try:
-                    # Закрытие модальных окон
                     popups = self.driver.find_elements(By.CSS_SELECTOR, "div.ant-modal-content")
                     for popup in popups:
                         try:
@@ -133,7 +132,6 @@ class AliveWaterMonitor:
                         except:
                             continue
                     
-                    # Куки-баннеры
                     cookie_banners = self.driver.find_elements(By.CSS_SELECTOR, "div.cookie-banner, div.cookie-notice")
                     for banner in cookie_banners:
                         try:
@@ -144,7 +142,6 @@ class AliveWaterMonitor:
                         except:
                             continue
                     
-                    # JavaScript для сложных случаев
                     self.driver.execute_script("""
                         document.querySelectorAll('div[aria-label="Close"], button.ant-modal-close').forEach(el => {
                             try { el.click(); } catch(e) {}
@@ -186,7 +183,7 @@ class AliveWaterMonitor:
                 EC.visibility_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
             )
             
-            time.sleep(3)  # Ожидание загрузки данных
+            time.sleep(3)
             self.close_popups()
             
             rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
@@ -218,7 +215,6 @@ class AliveWaterMonitor:
                 except Exception as e:
                     logging.warning(f"Ошибка обработки строки продажи: {e}")
 
-            # Отправка уведомлений о новых продажах
             for sale in reversed(new_sales):
                 self.send_notification(
                     f"💰 Новая продажа #{sale['id']}\n"
@@ -230,7 +226,6 @@ class AliveWaterMonitor:
                 )
                 logging.info(f"Обнаружена новая продажа: {sale['id']}")
 
-            # Обновление состояния
             if new_sales:
                 self.state['last_sale_id'] = new_sales[0]['id']
                 self.save_state()
@@ -247,7 +242,7 @@ class AliveWaterMonitor:
                 EC.visibility_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
             )
             
-            time.sleep(3)  # Ожидание загрузки данных
+            time.sleep(3)
             self.close_popups()
             
             current_problems = {}
@@ -261,10 +256,8 @@ class AliveWaterMonitor:
                 except Exception as e:
                     logging.error(f"Ошибка обработки терминала: {e}")
 
-            # Проверка изменений состояния
             last_problems = self.state.get('last_problems', {})
             
-            # Новые проблемы
             for name, count in current_problems.items():
                 if name not in last_problems or last_problems[name] < count:
                     self.send_notification(
@@ -273,7 +266,6 @@ class AliveWaterMonitor:
                         f"🔗 Ссылка: {urljoin(BASE_URL, 'terminals')}"
                     )
             
-            # Восстановленные терминалы
             for name in list(last_problems.keys()):
                 if name not in current_problems:
                     self.send_notification(
@@ -282,7 +274,6 @@ class AliveWaterMonitor:
                         f"🔗 Ссылка: {urljoin(BASE_URL, 'terminals')}"
                     )
             
-            # Обновление состояния
             self.state['last_problems'] = current_problems
             self.save_state()
                     
