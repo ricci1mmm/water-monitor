@@ -1,32 +1,39 @@
-name: Water Monitor
+name: AliveWater Monitor
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Запускать каждые 5 минут
+    - cron: '*/5 * * * *'  # Каждые 5 минут (обязательно в кавычках!)
   workflow_dispatch:
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y chromium-browser chromium-chromedriver
-        pip install selenium webdriver-manager telebot
-    
-    - name: Run monitor
-      env:
-        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        LOGIN: ${{ secrets.LOGIN }}
-        PASSWORD: ${{ secrets.PASSWORD }}
-      run: |
-        python monitor.py
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Debug schedule
+        run: |
+          echo "Текущее время: $(date)"
+          echo "Расписание: ${{ github.event.schedule }}"
+          echo "Event: ${{ github.event_name }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-driver
+          pip install selenium webdriver-manager telebot
+
+      - name: Run monitoring
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          LOGIN: ${{ secrets.LOGIN }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+        run: |
+          python monitor.py
+          echo "Мониторинг завершен в $(date)"
