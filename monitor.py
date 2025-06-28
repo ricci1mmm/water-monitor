@@ -2,8 +2,6 @@
 import os
 import time
 import logging
-import sqlite3
-import threading
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -27,30 +25,14 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 BASE_URL = 'https://my.alivewater.cloud/'
 LOGIN = os.getenv('LOGIN')
 PASSWORD = os.getenv('PASSWORD')
-ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')  # Необязательный параметр
 CHECK_INTERVAL = 60
 MAX_WAIT = 30
 MAX_LOGIN_ATTEMPTS = 3
 
+# Получаем список подписчиков из переменной окружения
+SUBSCRIBERS = list(map(int, os.getenv('SUBSCRIBERS').split(',')))
+
 bot = telebot.TeleBot(BOT_TOKEN)
-
-# Инициализация базы данных
-def init_db():
-    conn = sqlite3.connect('subscribers.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS subscribers (
-            chat_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()
 
 class AliveWaterMonitor:
     def __init__(self):
@@ -199,29 +181,12 @@ class AliveWaterMonitor:
 
     def send_notification(self, message):
         """Отправка уведомления всем подписчикам"""
-        conn = sqlite3.connect('subscribers.db')
-        cursor = conn.cursor()
-        cursor.execute('SELECT chat_id FROM subscribers')
-        subscribers = cursor.fetchall()
-        conn.close()
-        
-        for (chat_id,) in subscribers:
+        for chat_id in SUBSCRIBERS:
             try:
                 bot.send_message(chat_id, message)
                 logging.info(f"Уведомление отправлено в чат {chat_id}")
             except Exception as e:
                 logging.error(f"Ошибка отправки в чат {chat_id}: {e}")
-                if "bot was blocked" in str(e):
-                    self.remove_subscriber(chat_id)
-
-    def remove_subscriber(self, chat_id):
-        """Удаление подписчика при блокировке бота"""
-        conn = sqlite3.connect('subscribers.db')
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM subscribers WHERE chat_id = ?', (chat_id,))
-        conn.commit()
-        conn.close()
-        logging.info(f"Удален подписчик {chat_id} (блокировка бота)")
 
     def run(self):
         """Основной цикл мониторинга"""
@@ -236,128 +201,13 @@ class AliveWaterMonitor:
             self.check_terminals()
             
         except Exception as e:
-            error_msg = f"🔴 Критическая ошибка: {str(e)[:200]}"
-            logging.error(error_msg, exc_info=True)
-            if ADMIN_CHAT_ID:
-                bot.send_message(ADMIN_CHAT_ID, error_msg)
+            self.send_notification(f"🔴 Критическая ошибка: {str(e)[:200]}")
+            logging.error(f"Критическая ошибка: {e}", exc_info=True)
         finally:
             if self.driver:
                 self.driver.quit()
             logging.info("Драйвер закрыт")
 
-# Команды бота
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    bot.reply_to(message, 
-        "👋 Привет! Я бот для мониторинга AliveWater.\n\n"
-        "📋 Доступные команды:\n"
-        "/subscribe - подписаться на уведомления\n"
-        "/unsubscribe - отписаться от уведомлений\n"
-        "/id - узнать свой chat_id\n\n"
-        "Автоматические уведомления приходят каждые 5 минут."
-    )
-
-@bot.message_handler(commands=['subscribe'])
-def subscribe(message):
-    conn = sqlite3.connect('subscribers.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute(
-            'INSERT OR IGNORE INTO subscribers (chat_id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
-            (message.chat.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
-        )
-        conn.commit()
-        
-        if cursor.rowcount > 0:
-            reply = "✅ Вы успешно подписались на уведомления!"
-            logging.info(f"Новый подписчик: {message.chat.id}")
-        else:
-            reply = "ℹ️ Вы уже подписаны на уведомления"
-        
-        bot.reply_to(message, reply)
-    except Exception as e:
-        bot.reply_to(message, f"❌ Ошибка подписки: {e}")
-        logging.error(f"Ошибка подписки: {e}")
-    finally:
-        conn.close()
-
-@bot.message_handler(commands=['unsubscribe'])
-def unsubscribe(message):
-    conn = sqlite3.connect('subscribers.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute(
-            'DELETE FROM subscribers WHERE chat_id = ?',
-            (message.chat.id,)
-        )
-        conn.commit()
-        
-        if cursor.rowcount > 0:
-            reply = "✅ Вы отписались от уведомлений"
-            logging.info(f"Отписался: {message.chat.id}")
-        else:
-            reply = "ℹ️ Вы не были подписаны"
-        
-        bot.reply_to(message, reply)
-    except Exception as e:
-        bot.reply_to(message, f"❌ Ошибка отписки: {e}")
-        logging.error(f"Ошибка отписки: {e}")
-    finally:
-        conn.close()
-
-@bot.message_handler(commands=['id'])
-def send_id(message):
-    bot.reply_to(message, f"Ваш chat_id: `{message.chat.id}`", parse_mode='Markdown')
-
-@bot.message_handler(commands=['stats'])
-def show_stats(message):
-    if ADMIN_CHAT_ID and str(message.chat.id) != ADMIN_CHAT_ID:
-        return
-        
-    conn = sqlite3.connect('subscribers.db')
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('SELECT COUNT(*) FROM subscribers')
-        count = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT username, first_name, last_name, chat_id 
-            FROM subscribers 
-            ORDER BY subscribed_at DESC 
-            LIMIT 10
-        ''')
-        last_subscribers = cursor.fetchall()
-        
-        stats_msg = f"📊 Всего подписчиков: {count}\n\n"
-        stats_msg += "Последние 10 подписчиков:\n"
-        
-        for sub in last_subscribers:
-            username, first_name, last_name, chat_id = sub
-            name = f"{first_name or ''} {last_name or ''}".strip() or username or "Без имени"
-            stats_msg += f"- {name} (`{chat_id}`)\n"
-        
-        bot.reply_to(message, stats_msg, parse_mode='Markdown')
-    except Exception as e:
-        bot.reply_to(message, f"❌ Ошибка получения статистики: {e}")
-    finally:
-        conn.close()
-
-def run_bot():
-    """Запуск бота в отдельном потоке"""
-    try:
-        bot.infinity_polling()
-    except Exception as e:
-        logging.error(f"Ошибка бота: {e}")
-
 if __name__ == '__main__':
-    # Запускаем бота в отдельном потоке
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # Запускаем мониторинг
     monitor = AliveWaterMonitor()
     monitor.run()
