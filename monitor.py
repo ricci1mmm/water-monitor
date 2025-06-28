@@ -1,248 +1,210 @@
+
 import os
 import time
 import logging
-import sqlite3
-import threading
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 import telebot
 from urllib.parse import urljoin
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('water_monitor.log')
-    ]
+    handlers=[logging.StreamHandler()]
 )
 
-# Конфигурация
+# Конфигурация из переменных окружения
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 BASE_URL = 'https://my.alivewater.cloud/'
 LOGIN = os.getenv('LOGIN')
 PASSWORD = os.getenv('PASSWORD')
-ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')
+CHECK_INTERVAL = 60
+MAX_WAIT = 30
+MAX_LOGIN_ATTEMPTS = 3
 
-if not all([BOT_TOKEN, LOGIN, PASSWORD]) or ':' not in BOT_TOKEN:
-    logging.error("Неверные настройки! Проверьте BOT_TOKEN, LOGIN и PASSWORD")
-    exit(1)
+bot = telebot.TeleBot(BOT_TOKEN)
 
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
-
-class WaterMonitor:
+class AliveWaterMonitor:
     def __init__(self):
         self.driver = None
         self.last_sale = None
-        self.setup_driver()
+        self.last_problems = {}
+        self.login_attempts = 0
+        self.initialize_driver()
 
-    def setup_driver(self):
-        """Настройка ChromeDriver с улучшенными параметрами"""
+    def initialize_driver(self):
+        """Инициализация веб-драйвера"""
         try:
-            options = Options()
-            
-            # Критически важные параметры для работы в headless
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--window-size=1920,1080")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--disable-extensions")
-            
-            # Попробуем сначала без headless для диагностики
-            # options.add_argument("--headless=new")
-            
-            # Настройки для обхода защиты
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--window-size=1200,800")
             
             service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=options)
-            
-            # Изменяем свойство navigator.webdriver
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
-            self.driver.set_page_load_timeout(30)
-            return True
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.driver.implicitly_wait(10)
+            logging.info("Драйвер успешно инициализирован")
         except Exception as e:
             logging.error(f"Ошибка инициализации драйвера: {e}")
-            return False
+            raise
 
     def login(self):
-        """Улучшенная авторизация с обработкой различных сценариев"""
+        """Авторизация в системе"""
         try:
-            logging.info("Попытка авторизации на сайте...")
             self.driver.get(urljoin(BASE_URL, 'login'))
-            
-            # Явное ожидание появления формы
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "form"))
-            )
-            
-            # Ввод логина
-            login_field = WebDriverWait(self.driver, 15).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "input[name='login']"))
-            )
-            login_field.clear()
-            login_field.send_keys(LOGIN)
-            
-            # Ввод пароля
-            password_field = self.driver.find_element(By.CSS_SELECTOR, "input[name='password']")
-            password_field.clear()
-            password_field.send_keys(PASSWORD)
-            
-            # Клик по кнопке входа
-            submit_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            submit_button.click()
-            
-            # Ожидание успешного входа (адаптивный вариант)
-            WebDriverWait(self.driver, 20).until(
-                lambda d: "dashboard" in d.current_url or 
-                         any(text in d.page_source for text in ["Добро пожаловать", "Welcome"])
-            )
-            
-            logging.info("Авторизация успешна")
-            return True
-            
-        except Exception as e:
-            logging.error(f"Ошибка авторизации: {str(e)[:200]}")
-            
-            # Сохраняем скриншот для диагностики
+            time.sleep(2)
+
             try:
-                self.driver.save_screenshot("login_error.png")
-                logging.info("Скриншот ошибки сохранен в login_error.png")
+                popup = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content"))
+                )
+                popup.find_element(By.CSS_SELECTOR, "button.ant-btn-primary").click()
+                logging.info("Всплывающее окно закрыто")
             except:
                 pass
+
+            WebDriverWait(self.driver, MAX_WAIT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='login']"))
+            ).send_keys(LOGIN)
             
+            self.driver.find_element(By.CSS_SELECTOR, "input[name='password']").send_keys(PASSWORD)
+            self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+            
+            WebDriverWait(self.driver, MAX_WAIT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "span._container_iuuwv_1"))
+            )
+            self.login_attempts = 0
+            return True
+        except Exception as e:
+            self.login_attempts += 1
+            logging.error(f"Ошибка авторизации (попытка {self.login_attempts}): {e}")
             return False
 
     def check_sales(self):
         """Проверка новых продаж"""
         try:
-            if not self.login():
-                logging.error("Не удалось авторизоваться, пропускаем проверку")
-                return
-
-            logging.info("Переход на страницу продаж...")
             self.driver.get(urljoin(BASE_URL, 'sales'))
-            
-            # Ожидание загрузки таблицы
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table"))
+            WebDriverWait(self.driver, MAX_WAIT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr"))
             )
             
-            # Поиск последней продажи
-            rows = self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+            rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
             if not rows:
-                logging.info("Таблица продаж пуста")
                 return
 
             first_row = rows[0]
             cells = first_row.find_elements(By.TAG_NAME, "td")
-            if len(cells) < 6:
-                logging.warning("Неожиданное количество столбцов в таблице")
-                return
-
-            sale_data = {
-                'number': cells[0].text.strip(),
-                'address': cells[1].text.strip(),
-                'time': cells[2].text.strip(),
-                'liters': cells[3].text.strip(),
-                'total': cells[4].text.strip(),
-                'payment': self.get_payment_type(cells[5])
-            }
-
-            if not self.last_sale or sale_data['number'] != self.last_sale['number']:
-                self.last_sale = sale_data
-                self.send_alert(sale_data)
-
+            
+            if len(cells) >= 6:
+                sale_data = {
+                    'number': cells[0].text.strip(),
+                    'address': cells[1].text.strip(),
+                    'time': cells[2].text.strip(),
+                    'liters': cells[3].text.strip(),
+                    'total': cells[4].text.strip(),
+                    'payment': self.get_payment_method(cells[5])
+                }
+                
+                if not self.last_sale or sale_data['number'] != self.last_sale['number']:
+                    self.last_sale = sale_data
+                    self.send_notification(
+                        f"💰 Новая продажа #{sale_data['number']}\n"
+                        f"🏠 {sale_data['address']}\n"
+                        f"⏰ {sale_data['time']} | ⚖️{sale_data['liters']}\n"
+                        f"💵 {sale_data['total']} ({sale_data['payment']})"
+                    )
         except Exception as e:
             logging.error(f"Ошибка проверки продаж: {e}")
-            try:
-                self.driver.save_screenshot("sales_error.png")
-            except:
-                pass
 
-    def get_payment_type(self, cell):
-        """Определение типа оплаты"""
+    def get_payment_method(self, cell):
+        """Определение метода оплаты"""
         try:
-            # Попробуем определить по классам
-            class_list = cell.get_attribute("class")
-            if 'coin' in class_list.lower():
-                return "🪙 Монеты"
-            elif 'bill' in class_list.lower():
-                return "💵 Купюры"
-            elif 'card' in class_list.lower():
-                return "💳 Карта"
+            icons = cell.find_elements(By.CSS_SELECTOR, "svg")
+            if not icons:
+                return "Неизвестно"
+                
+            icon_html = icons[0].get_attribute("outerHTML")
             
-            # Альтернативный вариант по иконкам
-            icon = cell.find_element(By.CSS_SELECTOR, "svg").get_attribute("outerHTML")
-            if 'coin' in icon.lower():
-                return "🪙 Монеты"
-            elif 'bill' in icon.lower():
-                return "💵 Купюры"
-            elif 'card' in icon.lower():
-                return "💳 Карта"
+            if 'd="M336 32c-48.6 0-92.6 9-124.5 23.4' in icon_html:
+                return "Монеты"
+            elif 'd="M528 32H48C21.5 32 0 53.5 0 80v352c0 26.5' in icon_html:
+                return "Банковская карта"
+            elif 'd="M320 144c-53.02 0-96 50.14-96 112 0 61.85' in icon_html:
+                return "Купюры"
             
-            return "❓ Неизвестно"
-        except:
-            return "❓ Неизвестно"
+            return "Неизвестно"
+        except Exception as e:
+            logging.warning(f"Ошибка определения метода оплаты: {e}")
+            return "Неизвестно"
 
-    def send_alert(self, sale_data):
-        """Отправка уведомления"""
-        message = (
-            f"💰 <b>Новая продажа #{sale_data['number']}</b>\n"
-            f"🏠 {sale_data['address']}\n"
-            f"⏰ {sale_data['time']} | ⚖️ {sale_data['liters']}л\n"
-            f"💵 {sale_data['total']}\n"
-            f"🔹 {sale_data['payment']}"
-        )
-        
+    def check_terminals(self):
+        """Проверка состояния терминалов"""
         try:
-            conn = sqlite3.connect('subscribers.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT chat_id FROM subscribers")
-            for (chat_id,) in cursor.fetchall():
+            self.driver.get(urljoin(BASE_URL, 'terminals'))
+            WebDriverWait(self.driver, MAX_WAIT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
+            )
+            
+            problem_terminals = self.driver.find_elements(By.CSS_SELECTOR, "tr._hasProblem_1gunj_20")
+            for terminal in problem_terminals:
                 try:
-                    bot.send_message(chat_id, message)
-                    logging.info(f"Уведомление отправлено в чат {chat_id}")
+                    name = terminal.find_element(By.CSS_SELECTOR, "td:nth-child(2)").text.strip()
+                    alerts_count = len(terminal.find_elements(By.CSS_SELECTOR, "span._error_irtpv_12"))
+                    
+                    if name not in self.last_problems or alerts_count > self.last_problems[name].get('count', 0):
+                        self.send_notification(
+                            f"⚠️ Проблема с терминалом: {name}\n"
+                            f"Количество ошибок: {alerts_count}"
+                        )
+                        self.last_problems[name] = {
+                            'count': alerts_count,
+                            'last_check': datetime.now().strftime("%Y-%m-%d %H:%M")
+                        }
+                        
                 except Exception as e:
-                    logging.error(f"Ошибка отправки: {e}")
+                    logging.error(f"Ошибка обработки терминала: {e}")
+                    
         except Exception as e:
-            logging.error(f"Ошибка работы с БД: {e}")
-        finally:
-            conn.close()
+            logging.error(f"Ошибка проверки терминалов: {e}")
+            self.send_notification("🔴 Не удалось проверить состояние терминалов")
 
-def run_monitor():
-    """Основной цикл мониторинга"""
-    monitor = WaterMonitor()
-    while True:
+    def send_notification(self, message):
+        """Отправка уведомления в Telegram"""
         try:
-            monitor.check_sales()
-            time.sleep(60)  # Проверка каждую минуту
+            bot.send_message(CHAT_ID, message)
+            logging.info(f"Уведомление отправлено: {message[:50]}...")
         except Exception as e:
-            logging.error(f"Критическая ошибка: {e}")
-            time.sleep(60)
+            logging.error(f"Ошибка отправки уведомления: {e}")
+
+    def run(self):
+        """Основной цикл мониторинга"""
+        try:
+            logging.info("Запуск мониторинга AliveWater")
+            
+            if not self.login():
+                self.send_notification("🔴 Ошибка авторизации!")
+                return
+            
+            self.check_sales()
+            self.check_terminals()
+            
+        except Exception as e:
+            self.send_notification(f"🔴 Критическая ошибка: {str(e)[:200]}")
+            logging.error(f"Критическая ошибка: {e}", exc_info=True)
+        finally:
+            if self.driver:
+                self.driver.quit()
+            logging.info("Драйвер закрыт")
 
 if __name__ == '__main__':
-    # Инициализация БД
-    with sqlite3.connect('subscribers.db') as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS subscribers (
-                chat_id INTEGER PRIMARY KEY,
-                subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-    # Запуск бота в отдельном потоке
-    bot_thread = threading.Thread(target=bot.infinity_polling, daemon=True)
-    bot_thread.start()
-
-    # Запуск мониторинга
-    run_monitor()
+    monitor = AliveWaterMonitor()
+    monitor.run()
