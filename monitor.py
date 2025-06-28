@@ -2,6 +2,10 @@
 import os
 import time
 import logging
+
+import json
+
+
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -37,6 +41,23 @@ class AliveWaterMonitor:
         self.last_problems = {}
         self.setup_driver()
 
+
+
+
+    def load_last_purchase():
+    try:
+        with open('last_purchase.json', 'r') as f:
+            return json.load(f)['last_purchase']
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+def save_last_purchase(date_str):
+    with open('last_purchase.json', 'w') as f:
+        json.dump({'last_purchase': date_str}, f)
+
+
+
+    
     def setup_driver(self):
         """Настройка Chrome WebDriver"""
         try:
@@ -150,7 +171,19 @@ class AliveWaterMonitor:
                     'total': cells[4].text.strip(),
                     'payment': self.get_payment_method(cells[5])
                 }
-                
+
+                last_purchase = load_last_purchase()
+if last_purchase:
+    print(f"Последняя покупка: {last_purchase}")
+else:
+    print("У вас еще не было покупок воды.")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+save_last_purchase(now)  # Сохраняем дату покупки
+print(f"Покупка воды зарегистрирована: {now}")
+
+
+
                 if not self.last_sale or sale_data['number'] != self.last_sale['number']:
                     self.last_sale = sale_data
                     self.send_notification(
