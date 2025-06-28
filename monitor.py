@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import telebot
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Настройка логирования
@@ -80,26 +80,119 @@ class AliveWaterMonitor:
             logging.error(f"Ошибка инициализации драйвера: {e}")
             raise
 
+    def close_popups(self):
+        """Закрытие всевозможных всплывающих окон перед логином"""
+        try:
+            # Попытка 1: Закрытие стандартных модальных окон
+            try:
+                popups = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.ant-modal-content"))
+                )
+                for popup in popups:
+                    try:
+                        close_btn = popup.find_element(By.CSS_SELECTOR, "button.ant-modal-close")
+                        if close_btn.is_displayed():
+                            self.driver.execute_script("arguments[0].click();", close_btn)
+                            logging.info("Модальное окно закрыто")
+                            time.sleep(1)  # Даем время для анимации
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Попытка 2: Закрытие cookie-баннеров
+            try:
+                cookie_banners = self.driver.find_elements(By.CSS_SELECTOR, "div.cookie-banner, div.cookie-notice")
+                for banner in cookie_banners:
+                    try:
+                        accept_btn = banner.find_element(By.CSS_SELECTOR, "button.accept-cookies, button#cookie-ok")
+                        if accept_btn.is_displayed():
+                            self.driver.execute_script("arguments[0].click();", accept_btn)
+                            logging.info("Cookie-баннер закрыт")
+                            time.sleep(0.5)
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Попытка 3: Закрытие уведомлений о новостях
+            try:
+                news_popups = self.driver.find_elements(By.CSS_SELECTOR, "div.newsletter-popup, div.promo-popup")
+                for popup in news_popups:
+                    try:
+                        close_btn = popup.find_element(By.CSS_SELECTOR, "button.close-news, button.popup-close")
+                        if close_btn.is_displayed():
+                            self.driver.execute_script("arguments[0].click();", close_btn)
+                            logging.info("Поп-ап новостей закрыт")
+                            time.sleep(0.5)
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Попытка 4: Закрытие любых других всплывающих окон с кнопкой закрытия
+            try:
+                generic_popups = self.driver.find_elements(By.CSS_SELECTOR, "div.popup, div.modal, div[role='dialog']")
+                for popup in generic_popups:
+                    try:
+                        if not popup.is_displayed():
+                            continue
+                            
+                        close_btns = popup.find_elements(By.CSS_SELECTOR, "button.close, button.dismiss, [aria-label='Close']")
+                        for btn in close_btns:
+                            if btn.is_displayed():
+                                self.driver.execute_script("arguments[0].click();", btn)
+                                logging.info("Всплывающее окно закрыто")
+                                time.sleep(0.5)
+                                break
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Дополнительная проверка через JavaScript
+            try:
+                # Закрытие элементов с классом 'popup' или 'overlay'
+                self.driver.execute_script("""
+                    // Скрываем всплывающие окна
+                    document.querySelectorAll('div.popup, div.overlay').forEach(el => {
+                        if (getComputedStyle(el).display !== 'none') {
+                            el.style.display = 'none';
+                        }
+                    });
+                    
+                    // Закрытие модальных окон
+                    const modals = document.querySelectorAll('div[role="dialog"]');
+                    modals.forEach(modal => {
+                        const closeBtn = modal.querySelector('button[aria-label="Close"], button.close');
+                        if (closeBtn) closeBtn.click();
+                    });
+                    
+                    // Удаление затемняющих фонов
+                    const backdrops = document.querySelectorAll('div.ant-modal-mask, div.modal-backdrop');
+                    backdrops.forEach(backdrop => {
+                        backdrop.parentNode.removeChild(backdrop);
+                    });
+                """)
+                logging.info("Проверка всплывающих окон через JavaScript выполнена")
+            except Exception as js_e:
+                logging.debug(f"Ошибка в JavaScript для закрытия окон: {js_e}")
+                
+        except Exception as e:
+            logging.warning(f"Ошибка при закрытии всплывающих окон: {e}")
+
     def login(self):
-        """Авторизация в системе"""
+        """Авторизация в системе с улучшенной обработкой всплывающих окон"""
         try:
             self.driver.get(urljoin(BASE_URL, 'login'))
             
-            # Ожидание загрузки страницы
+            # Ожидание полной загрузки страницы
             WebDriverWait(self.driver, MAX_WAIT).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             
-            # Закрытие всплывающего окна (если есть)
-            try:
-                popup = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content"))
-                )
-                close_btn = popup.find_element(By.CSS_SELECTOR, "button.ant-modal-close")
-                close_btn.click()
-                logging.info("Всплывающее окно закрыто")
-            except Exception:
-                logging.debug("Всплывающее окно не найдено")
+            # Закрытие всех возможных всплывающих окон
+            self.close_popups()
             
             # Ввод учетных данных
             login_field = WebDriverWait(self.driver, MAX_WAIT).until(
@@ -135,25 +228,37 @@ class AliveWaterMonitor:
         try:
             # Более надежный способ через aria-label
             try:
-                aria_label = cell.find_element(By.CSS_SELECTOR, "svg").get_attribute("aria-label")
+                svg_icon = cell.find_element(By.CSS_SELECTOR, "svg")
+                aria_label = svg_icon.get_attribute("aria-label")
                 if aria_label:
                     return aria_label
             except:
                 pass
                 
-            # Резервный метод через пути SVG
-            icons = cell.find_elements(By.CSS_SELECTOR, "svg")
-            if not icons:
-                return "Неизвестно"
+            # Резервный метод через title
+            try:
+                title = cell.find_element(By.CSS_SELECTOR, "svg title").text
+                if title:
+                    return title
+            except:
+                pass
                 
-            icon_html = icons[0].get_attribute("outerHTML")
-            
-            if 'd="M336 32c-48.6 0-92.6 9-124.5 23.4' in icon_html:
-                return "Монеты"
-            elif 'd="M528 32H48C21.5 32 0 53.5 0 80v352c0 26.5' in icon_html:
-                return "Банковская карта"
-            elif 'd="M320 144c-53.02 0-96 50.14-96 112 0 61.85' in icon_html:
-                return "Купюры"
+            # Резервный метод через пути SVG
+            try:
+                icons = cell.find_elements(By.CSS_SELECTOR, "svg")
+                if not icons:
+                    return "Неизвестно"
+                    
+                icon_html = icons[0].get_attribute("outerHTML")
+                
+                if 'd="M336 32c-48.6 0-92.6 9-124.5 23.4' in icon_html:
+                    return "Монеты"
+                elif 'd="M528 32H48C21.5 32 0 53.5 0 80v352c0 26.5' in icon_html:
+                    return "Банковская карта"
+                elif 'd="M320 144c-53.02 0-96 50.14-96 112 0 61.85' in icon_html:
+                    return "Купюры"
+            except:
+                pass
             
             return "Неизвестно"
         except Exception as e:
@@ -169,7 +274,10 @@ class AliveWaterMonitor:
             )
             
             # Ждем загрузки данных
-            time.sleep(2)
+            time.sleep(3)
+            
+            # Закрытие всплывающих окон на странице продаж
+            self.close_popups()
             
             # Получаем все строки таблицы
             rows = self.driver.find_elements(By.CSS_SELECTOR, "table.ant-table-tbody tr")
@@ -231,7 +339,10 @@ class AliveWaterMonitor:
             )
             
             # Ждем загрузки данных
-            time.sleep(2)
+            time.sleep(3)
+            
+            # Закрытие всплывающих окон на странице терминалов
+            self.close_popups()
             
             # Собираем текущее состояние
             current_problems = {}
@@ -243,7 +354,7 @@ class AliveWaterMonitor:
                     name = name_cell.text.strip()
                     
                     # Проверяем наличие ошибок
-                    error_icons = row.find_elements(By.CSS_SELECTOR, "span.status-error")
+                    error_icons = row.find_elements(By.CSS_SELECTOR, "span.ant-badge-status-error, span.status-error")
                     if error_icons:
                         current_problems[name] = {
                             'count': len(error_icons),
