@@ -2,10 +2,6 @@
 import os
 import time
 import logging
-
-import json
-
-
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -41,23 +37,6 @@ class AliveWaterMonitor:
         self.last_problems = {}
         self.setup_driver()
 
-
-
-
-    def load_last_purchase():
-    try:
-        with open('last_purchase.json', 'r') as f:
-            return json.load(f)['last_purchase']
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-def save_last_purchase(date_str):
-    with open('last_purchase.json', 'w') as f:
-        json.dump({'last_purchase': date_str}, f)
-
-
-
-    
     def setup_driver(self):
         """Настройка Chrome WebDriver"""
         try:
@@ -146,6 +125,54 @@ def save_last_purchase(date_str):
             logging.warning(f"Ошибка определения метода оплаты: {e}")
             return "Неизвестно"
 
+
+    def load_data():
+    try:
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"last_purchase": None}
+
+def save_data(last_purchase):
+    with open(DATA_FILE, 'w') as f:
+        json.dump({"last_purchase": last_purchase}, f)
+
+def main():
+    while True:
+        data = load_data()
+        last_purchase = data["last_purchase"]
+
+        if last_purchase:
+            print(f"Последняя покупка: {last_purchase}")
+        else:
+            print("У вас еще не было покупок воды.")
+
+        print("\n1 - Новая покупка воды")
+        print("2 - Выход")
+
+        choice = input("\nВыберите действие: ").strip()
+
+        if choice == "1":
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_data(now)
+            print(f"Покупка воды зарегистрирована: {now}")
+
+            # Отправка уведомления в Telegram
+            options = Options()
+            options.add_argument('--headless')
+            driver = webdriver.Chrome(options=options)
+            driver.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text=Купил воду {now}")
+            time.sleep(3)
+            driver.quit()
+
+        elif choice == "2":
+            print("Выход из программы.")
+            break
+
+        else:
+            print("Ошибка: выберите 1 или 2")
+
+    
     def check_sales(self):
         """Проверка новых продаж"""
         try:
@@ -171,19 +198,7 @@ def save_last_purchase(date_str):
                     'total': cells[4].text.strip(),
                     'payment': self.get_payment_method(cells[5])
                 }
-
-                last_purchase = load_last_purchase()
-if last_purchase:
-    print(f"Последняя покупка: {last_purchase}")
-else:
-    print("У вас еще не было покупок воды.")
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-save_last_purchase(now)  # Сохраняем дату покупки
-print(f"Покупка воды зарегистрирована: {now}")
-
-
-
+                
                 if not self.last_sale or sale_data['number'] != self.last_sale['number']:
                     self.last_sale = sale_data
                     self.send_notification(
@@ -255,6 +270,9 @@ print(f"Покупка воды зарегистрирована: {now}")
             if self.driver:
                 self.driver.quit()
                 logging.info("Драйвер закрыт")
+
+
+
 
 if __name__ == '__main__':
     monitor = AliveWaterMonitor()
