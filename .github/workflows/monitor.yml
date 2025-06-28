@@ -1,44 +1,32 @@
-name: AliveWater Monitor
+name: Water Monitor
 on:
   schedule:
-    - cron: "*/5 * * * *"  # Runs every 5 minutes
-  workflow_dispatch:       # Allow manual runs
+    - cron: '*/5 * * * *'  # Каждые 5 минут
+  workflow_dispatch:
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     
     steps:
-      # Step 1: Checkout code
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Step 2: Setup Python
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      # Step 3: Install dependencies
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-driver
-          pip install selenium webdriver-manager telebot
-
-      # Step 4: Run monitoring script
-      - name: Run monitoring
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          LOGIN: ${{ secrets.LOGIN }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-        run: python monitor.py
-
-      # Step 5: Save database (simplified version)
-      - name: Save database
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: subscribers-db
-          path: subscribers.db
-          retention-days: 3
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y chromium-browser chromium-chromedriver
+        pip install selenium webdriver-manager telebot
+    
+    - name: Run monitor
+      env:
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        LOGIN: ${{ secrets.LOGIN }}
+        PASSWORD: ${{ secrets.PASSWORD }}
+      run: |
+        python monitor.py
