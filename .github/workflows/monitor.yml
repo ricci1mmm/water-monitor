@@ -32,4 +32,6 @@ jobs:
           
       - name: Run monitor
         run: |
+          # Временное отключение headless для диагностики
+          sed -i 's/# options.add_argument("--headless=new")/options.add_argument("--headless=new")/' monitor.py
           python monitor.py
