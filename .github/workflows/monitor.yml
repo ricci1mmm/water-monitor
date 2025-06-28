@@ -1,7 +1,7 @@
 name: AliveWater Monitor
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Каждые 5 минут (обязательно в кавычках!)
+    - cron: '*/5 * * * *'  # Каждые 5 минут
   workflow_dispatch:
 
 jobs:
@@ -12,28 +12,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Debug schedule
-        run: |
-          echo "Текущее время: $(date)"
-          echo "Расписание: ${{ github.event.schedule }}"
-          echo "Event: ${{ github.event_name }}"
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-driver
-          pip install selenium webdriver-manager telebot
+          sudo apt-get install -y chromium-chromedriver
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium webdriver-manager telebot python-dotenv
+
+      - name: Create .env file
+        run: |
+          echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
+          echo "LOGIN=${{ secrets.LOGIN }}" >> .env
+          echo "PASSWORD=${{ secrets.PASSWORD }}" >> .env
+          echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
 
       - name: Run monitoring
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          LOGIN: ${{ secrets.LOGIN }}
-          PASSWORD: ${{ secrets.PASSWORD }}
         run: |
           python monitor.py
-          echo "Мониторинг завершен в $(date)"
