@@ -43,8 +43,8 @@ class AliveWaterMonitor:
             with open(DATA_FILE, 'r') as f:
                 state = json.load(f)
                 # Проверяем структуру файла
-                if 'last_sale' not in state:
-                    state['last_sale'] = None
+                if 'last_processed_sale' not in state:
+                    state['last_processed_sale'] = None
                 if 'last_problems' not in state:
                     state['last_problems'] = {}
                 if 'last_check' not in state:
@@ -52,7 +52,7 @@ class AliveWaterMonitor:
                 return state
         except (FileNotFoundError, json.JSONDecodeError):
             return {
-                'last_sale': None,
+                'last_processed_sale': None,  # Теперь храним только номер последней обработанной продажи
                 'last_problems': {},
                 'last_check': None
             }
@@ -158,9 +158,9 @@ class AliveWaterMonitor:
                 logging.info("Нет данных о продажах")
                 return
 
-            # Получаем все продажи на странице
-            current_sales = []
-            for row in rows[:5]:  # Проверяем только последние 5 продаж
+            # Собираем все продажи на странице
+            all_sales = []
+            for row in rows:
                 try:
                     cells = row.find_elements(By.TAG_NAME, "td")
                     if len(cells) >= 6:
@@ -173,33 +173,47 @@ class AliveWaterMonitor:
                             'payment': self.get_payment_method(cells[5]),
                             'timestamp': datetime.now().isoformat()
                         }
-                        current_sales.append(sale_data)
+                        all_sales.append(sale_data)
                 except Exception as e:
                     logging.error(f"Ошибка обработки строки продажи: {e}")
 
-            if not current_sales:
+            if not all_sales:
                 logging.info("Не удалось получить данные о продажах")
                 return
 
-            # Проверяем, есть ли новые продажи
-            if self.state['last_sale']:
-                last_sale_number = self.state['last_sale']['number']
-                new_sales = [sale for sale in current_sales if sale['number'] != last_sale_number]
+            # Определяем новые продажи
+            if self.state['last_processed_sale'] is None:
+                # Первый запуск - запоминаем последнюю продажу, но не отправляем уведомления
+                self.state['last_processed_sale'] = all_sales[0]['number']
+                self.save_state()
+                logging.info(f"Первая инициализация. Запомнена продажа #{self.state['last_processed_sale']}")
+                return
+            
+            # Находим индекс последней обработанной продажи
+            last_processed_index = -1
+            for i, sale in enumerate(all_sales):
+                if sale['number'] == self.state['last_processed_sale']:
+                    last_processed_index = i
+                    break
+            
+            if last_processed_index == -1:
+                # Не нашли последнюю обработанную продажу - возможно, список обновился полностью
+                # Отправляем все продажи, кроме самой последней (чтобы не дублировать)
+                new_sales = all_sales[:-1]
             else:
-                new_sales = current_sales[:1]  # Берем только последнюю, если это первый запуск
-
-            # Если есть новые продажи, обрабатываем их от новых к старым
+                # Все продажи перед last_processed_index - новые
+                new_sales = all_sales[:last_processed_index]
+            
+            # Отправляем уведомления о новых продажах в хронологическом порядке (от старых к новым)
+            for sale in reversed(new_sales):
+                self.send_sale_notification(sale)
+                time.sleep(1)  # Небольшая задержка между уведомлениями
+            
+            # Обновляем статус только если были новые продажи
             if new_sales:
-                # Сортируем по номеру (предполагая, что чем больше номер, тем новее продажа)
-                new_sales_sorted = sorted(new_sales, key=lambda x: int(x['number']), reverse=True)
-                
-                for sale in new_sales_sorted:
-                    # Проверяем, не была ли уже обработана эта продажа
-                    if not self.state['last_sale'] or sale['number'] != self.state['last_sale']['number']:
-                        self.send_sale_notification(sale)
-                        self.state['last_sale'] = sale
-                        self.save_state()
-                        break  # Отправляем только самую новую продажу
+                self.state['last_processed_sale'] = all_sales[0]['number']
+                self.save_state()
+                logging.info(f"Обновлен номер последней обработанной продажи: #{self.state['last_processed_sale']}")
 
         except Exception as e:
             logging.error(f"Ошибка проверки продаж: {e}")
@@ -216,6 +230,7 @@ class AliveWaterMonitor:
             f"💳 Способ оплаты: {sale_data['payment']}"
         )
         self.send_notification(message)
+        logging.info(f"Отправлено уведомление о продаже #{sale_data['number']}")
 
     def check_terminals(self):
         """Проверка состояния терминалов"""
