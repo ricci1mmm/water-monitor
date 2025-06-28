@@ -132,45 +132,46 @@ class AliveWaterMonitor:
             logging.warning(f"Ошибка определения метода оплаты: {e}")
             return "Неизвестно"
 
-    def check_sales(self):
-        """Проверка новых продаж"""
-        try:
-            self.driver.get(urljoin(BASE_URL, 'sales'))
-            WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1")))
-            
-            rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
-            if not rows:
-                logging.info("Нет данных о продажах")
-                return
+ def check_sales(self):
+    """Проверка новых продаж"""
+    try:
+        self.driver.get(urljoin(BASE_URL, 'sales'))
+        WebDriverWait(self.driver, MAX_WAIT).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
+        )
+        
+        rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
+        if not rows:
+            logging.info("Нет данных о продажах")
+            return
 
-            first_row = rows[0]
-            cells = first_row.find_elements(By.TAG_NAME, "td")
+        first_row = rows[0]
+        cells = first_row.find_elements(By.TAG_NAME, "td")
+        
+        if len(cells) >= 6:
+            sale_data = {
+                'number': cells[0].text.strip(),
+                'address': cells[1].text.strip(),
+                'time': cells[2].text.strip(),
+                'liters': cells[3].text.strip(),
+                'total': cells[4].text.strip(),
+                'payment': self.get_payment_method(cells[5])
+            }
             
-            if len(cells) >= 6:
-                sale_data = {
-                    'number': cells[0].text.strip(),
-                    'address': cells[1].text.strip(),
-                    'time': cells[2].text.strip(),
-                    'liters': cells[3].text.strip(),
-                    'total': cells[4].text.strip(),
-                    'payment': self.get_payment_method(cells[5])
-                }
-                
-                if not self.state['last_sale'] or sale_data['number'] != self.state['last_sale']['number']:
-                    self.state['last_sale'] = sale_data
-                    self.save_state()
-                    self.send_notification(
-                        f"💰 Новая продажа #{sale_data['number']}\n"
-                        f"🏠 Адрес: {sale_data['address']}\n"
-                        f"⏰ Время: {sale_data['time']}\n"
-                        f"⚖️ Объем: {sale_data['liters']}\n"
-                        f"💵 Сумма: {sale_data['total']}\n"
-                        f"💳 Способ оплаты: {sale_data['payment']}"
-                    )
-        except Exception as e:
-            logging.error(f"Ошибка проверки продаж: {e}")
-            self.send_notification(f"🔴 Ошибка проверки продаж: {str(e)[:200]}")
+            if not self.state['last_sale'] or sale_data['number'] != self.state['last_sale']['number']:
+                self.state['last_sale'] = sale_data
+                self.save_state()
+                self.send_notification(
+                    f"💰 Новая продажа #{sale_data['number']}\n"
+                    f"🏠 Адрес: {sale_data['address']}\n"
+                    f"⏰ Время: {sale_data['time']}\n"
+                    f"⚖️ Объем: {sale_data['liters']}\n"
+                    f"💵 Сумма: {sale_data['total']}\n"
+                    f"💳 Способ оплаты: {sale_data['payment']}"
+                )
+    except Exception as e:
+        logging.error(f"Ошибка проверки продаж: {e}")
+        self.send_notification(f"🔴 Ошибка проверки продаж: {str(e)[:200]}")
 
     def check_terminals(self):
         """Проверка состояния терминалов"""
