@@ -1,7 +1,7 @@
 name: AliveWater Monitor
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Проверка каждые 5 минут
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,7 +12,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Validate token
+        run: |
+          if [[ -z "${{ secrets.BOT_TOKEN }}" || "${{ secrets.BOT_TOKEN }}" != *:* ]]; then
+            echo "::error::Invalid BOT_TOKEN format! Should be like 123456789:ABCdef..."
+            exit 1
+          fi
+
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -20,16 +27,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-chromedriver
+          sudo apt-get install -y chromium-driver
           pip install selenium webdriver-manager telebot python-dotenv
 
-      - name: Create .env file
-        run: |
-          echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
-          echo "LOGIN=${{ secrets.LOGIN }}" >> .env
-          echo "PASSWORD=${{ secrets.PASSWORD }}" >> .env
-          [ -n "${{ secrets.ADMIN_CHAT_ID }}" ] && echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
-
       - name: Run monitor
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          LOGIN: ${{ secrets.LOGIN }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
         run: |
           python monitor.py
