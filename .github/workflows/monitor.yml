@@ -1,39 +1,44 @@
 name: AliveWater Monitor
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Каждые 5 минут (обязательно в кавычках!)
-  workflow_dispatch:
+    - cron: "*/5 * * * *"  # Runs every 5 minutes
+  workflow_dispatch:       # Allow manual runs
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
+      # Step 1: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Debug schedule
-        run: |
-          echo "Текущее время: $(date)"
-          echo "Расписание: ${{ github.event.schedule }}"
-          echo "Event: ${{ github.event_name }}"
-
+      # Step 2: Setup Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
+      # Step 3: Install dependencies
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y chromium-driver
           pip install selenium webdriver-manager telebot
 
+      # Step 4: Run monitoring script
       - name: Run monitoring
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           LOGIN: ${{ secrets.LOGIN }}
           PASSWORD: ${{ secrets.PASSWORD }}
-        run: |
-          python monitor.py
-          echo "Мониторинг завершен в $(date)"
+        run: python monitor.py
+
+      # Step 5: Save database (simplified version)
+      - name: Save database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subscribers-db
+          path: subscribers.db
+          retention-days: 3
