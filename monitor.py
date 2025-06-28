@@ -125,54 +125,6 @@ class AliveWaterMonitor:
             logging.warning(f"Ошибка определения метода оплаты: {e}")
             return "Неизвестно"
 
-
-    def load_data():
-    try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"last_purchase": None}
-
-def save_data(last_purchase):
-    with open(DATA_FILE, 'w') as f:
-        json.dump({"last_purchase": last_purchase}, f)
-
-def main():
-    while True:
-        data = load_data()
-        last_purchase = data["last_purchase"]
-
-        if last_purchase:
-            print(f"Последняя покупка: {last_purchase}")
-        else:
-            print("У вас еще не было покупок воды.")
-
-        print("\n1 - Новая покупка воды")
-        print("2 - Выход")
-
-        choice = input("\nВыберите действие: ").strip()
-
-        if choice == "1":
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            save_data(now)
-            print(f"Покупка воды зарегистрирована: {now}")
-
-            # Отправка уведомления в Telegram
-            options = Options()
-            options.add_argument('--headless')
-            driver = webdriver.Chrome(options=options)
-            driver.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text=Купил воду {now}")
-            time.sleep(3)
-            driver.quit()
-
-        elif choice == "2":
-            print("Выход из программы.")
-            break
-
-        else:
-            print("Ошибка: выберите 1 или 2")
-
-    
     def check_sales(self):
         """Проверка новых продаж"""
         try:
@@ -270,9 +222,6 @@ def main():
             if self.driver:
                 self.driver.quit()
                 logging.info("Драйвер закрыт")
-
-
-
 
 if __name__ == '__main__':
     monitor = AliveWaterMonitor()
