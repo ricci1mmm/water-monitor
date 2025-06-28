@@ -25,40 +25,31 @@ logging.basicConfig(
 )
 
 # Конфигурация
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-if not BOT_TOKEN:
-    logging.error("BOT_TOKEN не установлен!")
-    exit(1)
-
+BOT_TOKEN = os.getenv('BOT_TOKEN') or 'ВАШ_ТОКЕН_БОТА'
 BASE_URL = 'https://my.alivewater.cloud/'
-LOGIN = os.getenv('LOGIN')
-PASSWORD = os.getenv('PASSWORD')
-ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')
-CHECK_INTERVAL = 60
-MAX_WAIT = 30
-MAX_LOGIN_ATTEMPTS = 3
+LOGIN = os.getenv('LOGIN') or 'ВАШ_ЛОГИН'
+PASSWORD = os.getenv('PASSWORD') or 'ВАШ_ПАРОЛЬ'
+ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID', '')  # Необязательно
+CHECK_INTERVAL = 60  # Интервал проверки в секундах
+MAX_WAIT = 30  # Максимальное время ожидания элементов
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='HTML')
 
-# Улучшенная инициализация базы данных
+# Инициализация базы данных подписчиков
 def init_db():
-    try:
-        conn = sqlite3.connect('subscribers.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS subscribers (
-                chat_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logging.error(f"Ошибка инициализации БД: {e}")
-        exit(1)
+    conn = sqlite3.connect('subscribers.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS subscribers (
+            chat_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
 init_db()
 
@@ -66,81 +57,88 @@ class AliveWaterMonitor:
     def __init__(self):
         self.driver = None
         self.last_sale = None
-        self.last_problems = {}
-        self.login_attempts = 0
         self.initialize_driver()
 
     def initialize_driver(self):
-        """Инициализация веб-драйвера с улучшенными настройками"""
+        """Инициализация веб-драйвера Chrome"""
         try:
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--disable-extensions")
             
             service = Service(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.implicitly_wait(10)
-            logging.info("Драйвер успешно инициализирован")
+            logging.info("Драйвер Chrome успешно инициализирован")
         except Exception as e:
             logging.error(f"Ошибка инициализации драйвера: {e}")
-            self.send_admin_alert("🔴 Ошибка инициализации драйвера!")
             raise
 
     def login(self):
-        """Улучшенная авторизация с обработкой капчи"""
+        """Авторизация в системе AliveWater"""
         try:
-            for attempt in range(1, MAX_LOGIN_ATTEMPTS + 1):
-                try:
-                    self.driver.get(urljoin(BASE_URL, 'login'))
-                    time.sleep(3)
+            self.driver.get(urljoin(BASE_URL, 'login'))
+            time.sleep(2)
 
-                    # Закрытие возможного попапа
-                    try:
-                        popup = WebDriverWait(self.driver, 5).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content"))
-                        )
-                        popup.find_element(By.CSS_SELECTOR, "button.ant-btn-primary").click()
-                        logging.info("Всплывающее окно закрыто")
-                    except:
-                        pass
+            # Закрытие всплывающего окна, если есть
+            try:
+                popup = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content"))
+                )
+                popup.find_element(By.CSS_SELECTOR, "button.ant-btn-primary").click()
+                logging.info("Всплывающее окно закрыто")
+            except:
+                pass
 
-                    # Ввод учетных данных
-                    login_field = WebDriverWait(self.driver, MAX_WAIT).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='login']"))
-                    )
-                    login_field.clear()
-                    login_field.send_keys(LOGIN)
-                    
-                    password_field = self.driver.find_element(By.CSS_SELECTOR, "input[name='password']")
-                    password_field.clear()
-                    password_field.send_keys(PASSWORD)
-                    
-                    self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-                    
-                    # Проверка успешной авторизации
-                    WebDriverWait(self.driver, MAX_WAIT).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, "span._container_iuuwv_1"))
-                    )
-                    self.login_attempts = 0
-                    return True
-                except Exception as e:
-                    logging.warning(f"Попытка входа {attempt} не удалась: {e}")
-                    if attempt < MAX_LOGIN_ATTEMPTS:
-                        time.sleep(5)
-                        self.driver.refresh()
+            # Ввод учетных данных
+            WebDriverWait(self.driver, MAX_WAIT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='login']"))
+            ).send_keys(LOGIN)
             
-            logging.error("Превышено количество попыток входа")
-            return False
+            self.driver.find_element(By.CSS_SELECTOR, "input[name='password']").send_keys(PASSWORD)
+            self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+            
+            # Проверка успешной авторизации
+            WebDriverWait(self.driver, MAX_WAIT).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "span._container_iuuwv_1"))
+            )
+            logging.info("Авторизация успешна")
+            return True
         except Exception as e:
-            logging.error(f"Критическая ошибка авторизации: {e}")
+            logging.error(f"Ошибка авторизации: {e}")
             return False
+
+    def get_payment_method(self, cell):
+        """Определение способа оплаты с иконками"""
+        try:
+            # Проверка по классам элемента
+            classes = cell.get_attribute("class")
+            if 'coin' in classes.lower():
+                return "🪙 Монеты"
+            elif 'bill' in classes.lower():
+                return "💵 Купюры"
+            elif 'card' in classes.lower():
+                return "💳 Карта"
+            
+            # Проверка по SVG иконкам
+            icons = cell.find_elements(By.CSS_SELECTOR, "svg")
+            if icons:
+                icon_html = icons[0].get_attribute("outerHTML")
+                if 'coin' in icon_html.lower():
+                    return "🪙 Монеты"
+                elif 'bill' in icon_html.lower():
+                    return "💵 Купюры"
+                elif 'card' in icon_html.lower():
+                    return "💳 Карта"
+            
+            return "❓ Неизвестно"
+        except Exception as e:
+            logging.warning(f"Ошибка определения оплаты: {e}")
+            return "❓ Неизвестно"
 
     def check_sales(self):
-        """Проверка новых продаж с улучшенной обработкой"""
+        """Проверка новых продаж воды"""
         try:
             self.driver.get(urljoin(BASE_URL, 'sales'))
             WebDriverWait(self.driver, MAX_WAIT).until(
@@ -149,7 +147,6 @@ class AliveWaterMonitor:
             
             rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
             if not rows:
-                logging.info("Нет данных о продажах")
                 return
 
             first_row = rows[0]
@@ -170,18 +167,17 @@ class AliveWaterMonitor:
                     self.send_notification(
                         f"<b>💰 Новая продажа #{sale_data['number']}</b>\n"
                         f"🏠 <i>{sale_data['address']}</i>\n"
-                        f"⏰ {sale_data['time']} | ⚖️ {sale_data['liters']}\n"
-                        f"💵 {sale_data['total']} ({sale_data['payment']})"
+                        f"⏰ {sale_data['time']} | ⚖️ {sale_data['liters']} л\n"
+                        f"💵 <b>{sale_data['total']}</b>\n"
+                        f"🔹 {sale_data['payment']}"
                     )
-                    logging.info(f"Обнаружена новая продажа: {sale_data['number']}")
         except Exception as e:
             logging.error(f"Ошибка проверки продаж: {e}")
-            self.send_admin_alert("⚠️ Ошибка при проверке продаж")
-
-    # ... (остальные методы класса остаются без изменений)
+            if ADMIN_CHAT_ID:
+                bot.send_message(ADMIN_CHAT_ID, f"⚠️ Ошибка проверки продаж: {str(e)[:200]}")
 
     def send_notification(self, message):
-        """Улучшенная отправка уведомлений с ретраями"""
+        """Отправка уведомления всем подписчикам"""
         conn = sqlite3.connect('subscribers.db')
         cursor = conn.cursor()
         cursor.execute('SELECT chat_id FROM subscribers')
@@ -189,70 +185,94 @@ class AliveWaterMonitor:
         conn.close()
         
         for (chat_id,) in subscribers:
-            for attempt in range(3):
-                try:
-                    bot.send_message(chat_id, message)
-                    logging.info(f"Уведомление отправлено в чат {chat_id}")
-                    break
-                except Exception as e:
-                    logging.warning(f"Попытка {attempt + 1} для чата {chat_id} не удалась: {e}")
-                    if "bot was blocked" in str(e):
-                        self.remove_subscriber(chat_id)
-                        break
-                    time.sleep(2)
-
-    def send_admin_alert(self, message):
-        """Отправка уведомления администратору"""
-        if ADMIN_CHAT_ID:
             try:
-                bot.send_message(ADMIN_CHAT_ID, message)
+                bot.send_message(chat_id, message)
+                logging.info(f"Уведомление отправлено в чат {chat_id}")
             except Exception as e:
-                logging.error(f"Ошибка отправки админ-уведомления: {e}")
+                logging.error(f"Ошибка отправки в чат {chat_id}: {e}")
+                if "bot was blocked" in str(e):
+                    self.remove_subscriber(chat_id)
 
-    def run_monitoring_loop(self):
+    def remove_subscriber(self, chat_id):
+        """Удаление подписчика при блокировке бота"""
+        conn = sqlite3.connect('subscribers.db')
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM subscribers WHERE chat_id = ?', (chat_id,))
+        conn.commit()
+        conn.close()
+        logging.info(f"Удален подписчик {chat_id} (блокировка бота)")
+
+    def run(self):
         """Основной цикл мониторинга"""
+        logging.info("Сервис мониторинга запущен")
         while True:
             try:
-                logging.info("Запуск проверки...")
-                
                 if not self.login():
-                    self.send_admin_alert("🔴 Ошибка авторизации в системе!")
-                    time.sleep(300)
+                    time.sleep(60)
                     continue
                 
                 self.check_sales()
-                self.check_terminals()
-                
-                logging.info(f"Ожидание {CHECK_INTERVAL} секунд до следующей проверки...")
                 time.sleep(CHECK_INTERVAL)
                 
             except Exception as e:
-                error_msg = f"🔴 Критическая ошибка: {str(e)[:200]}"
-                logging.error(error_msg, exc_info=True)
-                self.send_admin_alert(error_msg)
-                time.sleep(300)
+                logging.error(f"Ошибка в основном цикле: {e}")
+                time.sleep(60)
 
-# ... (обработчики команд бота остаются без изменений)
+# Команды бота
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    bot.reply_to(message, 
+        "👋 Привет! Я бот для мониторинга продаж воды.\n\n"
+        "📋 Команды:\n"
+        "/subscribe - подписаться на уведомления\n"
+        "/unsubscribe - отписаться\n"
+        "/id - узнать ваш chat_id\n\n"
+        "Автоматически присылаю уведомления о новых продажах."
+    )
+
+@bot.message_handler(commands=['subscribe'])
+def subscribe(message):
+    conn = sqlite3.connect('subscribers.db')
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'INSERT OR IGNORE INTO subscribers (chat_id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
+            (message.chat.id, message.from_user.username, message.from_user.first_name, message.from_user.last_name)
+        )
+        conn.commit()
+        bot.reply_to(message, "✅ Вы подписаны на уведомления!" if cursor.rowcount > 0 else "ℹ️ Вы уже подписаны")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+    finally:
+        conn.close()
+
+@bot.message_handler(commands=['unsubscribe'])
+def unsubscribe(message):
+    conn = sqlite3.connect('subscribers.db')
+    cursor = conn.cursor()
+    try:
+        cursor.execute('DELETE FROM subscribers WHERE chat_id = ?', (message.chat.id,))
+        conn.commit()
+        bot.reply_to(message, "✅ Вы отписались" if cursor.rowcount > 0 else "ℹ️ Вы не были подписаны")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+    finally:
+        conn.close()
+
+@bot.message_handler(commands=['id'])
+def send_id(message):
+    bot.reply_to(message, f"Ваш chat_id: <code>{message.chat.id}</code>")
+
+def run_bot():
+    """Запуск бота в отдельном потоке"""
+    bot.infinity_polling()
 
 if __name__ == '__main__':
-    # Инициализация бота
-    def run_bot():
-        try:
-            bot.infinity_polling()
-        except Exception as e:
-            logging.error(f"Ошибка бота: {e}")
-
-    # Запуск бота в отдельном потоке
+    # Запуск бота
     bot_thread = threading.Thread(target=run_bot)
     bot_thread.daemon = True
     bot_thread.start()
     
     # Запуск мониторинга
-    try:
-        monitor = AliveWaterMonitor()
-        monitor.run_monitoring_loop()
-    except KeyboardInterrupt:
-        logging.info("Мониторинг остановлен пользователем")
-    except Exception as e:
-        logging.error(f"Фатальная ошибка мониторинга: {e}")
-        exit(1)
+    monitor = AliveWaterMonitor()
+    monitor.run()
