@@ -2,22 +2,6 @@
 import os
 import time
 import logging
-
-import json  # Добавь эту строку в импорты
-
-DATA_FILE = 'last_purchase.json'  # Файл для хранения данных
-
-def load_last_purchase():
-    try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f).get("last_purchase")
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-def save_last_purchase(date_str):
-    with open(DATA_FILE, 'w') as f:
-        json.dump({"last_purchase": date_str}, f)
-        
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -28,9 +12,6 @@ from selenium.webdriver.support import expected_conditions as EC
 import telebot
 from urllib.parse import urljoin
 from webdriver_manager.chrome import ChromeDriverManager
-
-
-
 
 # Настройка логирования
 logging.basicConfig(
@@ -50,58 +31,6 @@ MAX_WAIT = 30
 bot = telebot.TeleBot(BOT_TOKEN)
 
 class AliveWaterMonitor:
-
-    import json
-from datetime import datetime
-
-# Файл для хранения данных
-DATA_FILE = 'water_data.json'
-
-def load_data():
-    try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {'last_purchase': None, 'history': []}
-
-def save_data(data):
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f)
-
-def main():
-    data = load_data()
-    
-    print("1 - Новая покупка воды")
-    print("2 - Просмотр истории")
-    print("3 - Выход")
-    
-    choice = input("Выберите действие: ")
-    
-    if choice == "1":
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        data['last_purchase'] = now
-        data['history'].append(now)
-        save_data(data)
-        print(f"Покупка воды зарегистрирована: {now}")
-    
-    elif choice == "2":
-        if not data['history']:
-            print("История покупок пуста")
-        else:
-            print("История покупок:")
-            for purchase in data['history']:
-                print(purchase)
-    
-    elif choice == "3":
-        print("Выход")
-    
-    else:
-        print("Неверный выбор")
-
-if __name__ == "__main__":
-    main()
-
-    
     def __init__(self):
         self.driver = None
         self.last_sale = None
