@@ -1,6 +1,6 @@
-
 import os
 import time
+import json
 import logging
 from datetime import datetime
 from selenium import webdriver
@@ -27,15 +27,32 @@ BASE_URL = 'https://my.alivewater.cloud/'
 LOGIN = os.getenv('LOGIN')
 PASSWORD = os.getenv('PASSWORD')
 MAX_WAIT = 30
+DATA_FILE = 'water_monitor_state.json'
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 class AliveWaterMonitor:
     def __init__(self):
         self.driver = None
-        self.last_sale = None
-        self.last_problems = {}
+        self.state = self.load_state()
         self.setup_driver()
+
+    def load_state(self):
+        """Загрузка состояния из файла"""
+        try:
+            with open(DATA_FILE, 'r') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {
+                'last_sale': None,
+                'last_problems': {},
+                'last_check': None
+            }
+
+    def save_state(self):
+        """Сохранение состояния в файл"""
+        with open(DATA_FILE, 'w') as f:
+            json.dump(self.state, f, indent=2)
 
     def setup_driver(self):
         """Настройка Chrome WebDriver"""
@@ -55,30 +72,24 @@ class AliveWaterMonitor:
             raise
 
     def login(self):
-        """Авторизация в системе с улучшенной обработкой"""
+        """Авторизация в системе"""
         try:
             self.driver.get(urljoin(BASE_URL, 'login'))
             
-            # Ожидание загрузки страницы
             WebDriverWait(self.driver, MAX_WAIT).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
             
-            # Закрытие всплывающего окна (если есть)
             try:
                 popup = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content"))
-                )
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.ant-modal-content")))
                 close_btn = popup.find_element(By.CSS_SELECTOR, "button.ant-btn-primary")
                 self.driver.execute_script("arguments[0].click();", close_btn)
                 logging.info("Всплывающее окно закрыто")
-            except Exception as e:
+            except Exception:
                 logging.info("Всплывающее окно не найдено")
             
-            # Ввод учетных данных
             login_field = WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='login']"))
-            )
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='login']")))
             login_field.clear()
             login_field.send_keys(LOGIN)
             
@@ -86,16 +97,12 @@ class AliveWaterMonitor:
             password_field.clear()
             password_field.send_keys(PASSWORD)
             
-            # Нажатие кнопки входа
             submit_btn = WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
-            )
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
             submit_btn.click()
             
-            # Проверка успешного входа
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "span._container_iuuwv_1"))
-            )
+                EC.presence_of_element_located((By.CSS_SELECTOR, "span._container_iuuwv_1")))
             logging.info("Авторизация успешна")
             return True
             
@@ -130,8 +137,7 @@ class AliveWaterMonitor:
         try:
             self.driver.get(urljoin(BASE_URL, 'sales'))
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
-            )
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1")))
             
             rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
             if not rows:
@@ -151,8 +157,9 @@ class AliveWaterMonitor:
                     'payment': self.get_payment_method(cells[5])
                 }
                 
-                if not self.last_sale or sale_data['number'] != self.last_sale['number']:
-                    self.last_sale = sale_data
+                if not self.state['last_sale'] or sale_data['number'] != self.state['last_sale']['number']:
+                    self.state['last_sale'] = sale_data
+                    self.save_state()
                     self.send_notification(
                         f"💰 Новая продажа #{sale_data['number']}\n"
                         f"🏠 Адрес: {sale_data['address']}\n"
@@ -170,8 +177,7 @@ class AliveWaterMonitor:
         try:
             self.driver.get(urljoin(BASE_URL, 'terminals'))
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
-            )
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1")))
             
             problem_terminals = self.driver.find_elements(By.CSS_SELECTOR, "tr._hasProblem_1gunj_20")
             for terminal in problem_terminals:
@@ -179,16 +185,18 @@ class AliveWaterMonitor:
                     name = terminal.find_element(By.CSS_SELECTOR, "td:nth-child(2)").text.strip()
                     error_count = len(terminal.find_elements(By.CSS_SELECTOR, "span._error_irtpv_12"))
                     
-                    if name not in self.last_problems or error_count > self.last_problems[name].get('count', 0):
+                    if (name not in self.state['last_problems'] or 
+                        error_count > self.state['last_problems'][name].get('count', 0)):
                         self.send_notification(
                             f"⚠️ Проблема с терминалом: {name}\n"
                             f"🔴 Количество ошибок: {error_count}\n"
                             f"🔗 Ссылка: {urljoin(BASE_URL, 'terminals')}"
                         )
-                        self.last_problems[name] = {
+                        self.state['last_problems'][name] = {
                             'count': error_count,
                             'last_check': datetime.now().strftime("%Y-%m-%d %H:%M")
                         }
+                        self.save_state()
                 except Exception as e:
                     logging.error(f"Ошибка обработки терминала: {e}")
                     
