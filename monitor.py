@@ -2,6 +2,22 @@
 import os
 import time
 import logging
+
+import json  # Добавь эту строку в импорты
+
+DATA_FILE = 'last_purchase.json'  # Файл для хранения данных
+
+def load_last_purchase():
+    try:
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f).get("last_purchase")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+def save_last_purchase(date_str):
+    with open(DATA_FILE, 'w') as f:
+        json.dump({"last_purchase": date_str}, f)
+        
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
