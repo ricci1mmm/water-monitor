@@ -2,7 +2,7 @@ import os
 import time
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -27,7 +27,7 @@ BASE_URL = 'https://my.alivewater.cloud/'
 LOGIN = os.getenv('LOGIN')
 PASSWORD = os.getenv('PASSWORD')
 MAX_WAIT = 30
-POLL_INTERVAL = 300  # 5 минут
+POLL_INTERVAL = 300  # 5 минут между проверками
 DATA_FILE = 'water_monitor_state.json'
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -37,6 +37,7 @@ class AliveWaterMonitor:
         self.driver = None
         self.state = self.load_state()
         self.setup_driver()
+        self.is_running = True
 
     def load_state(self):
         """Загрузка состояния из файла"""
@@ -49,7 +50,7 @@ class AliveWaterMonitor:
                 return state
         except (FileNotFoundError, json.JSONDecodeError):
             return {
-                'last_sale_id': None,
+                'last_sale_id': None,  # Изменено на ID последней продажи
                 'last_problems': {},
                 'last_check': None,
                 'known_terminals': {}
@@ -64,134 +65,30 @@ class AliveWaterMonitor:
         """Настройка Chrome WebDriver"""
         try:
             chrome_options = Options()
-            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--window-size=1200,800")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--disable-infobars")
-            chrome_options.add_argument("--disable-extensions")
             
             service = Service(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.implicitly_wait(5)  # Уменьшаем неявное ожидание
+            self.driver.implicitly_wait(10)
             logging.info("Драйвер успешно инициализирован")
         except Exception as e:
             logging.error(f"Ошибка инициализации драйвера: {e}")
             raise
 
-    def close_popups(self):
-        """Закрытие всевозможных всплывающих окон перед логином"""
-        try:
-            # Попытка 1: Закрытие стандартных модальных окон
-            try:
-                popups = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.ant-modal-content"))
-                )
-                for popup in popups:
-                    try:
-                        close_btn = popup.find_element(By.CSS_SELECTOR, "button.ant-modal-close")
-                        if close_btn.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", close_btn)
-                            logging.info("Модальное окно закрыто")
-                            time.sleep(1)  # Даем время для анимации
-                    except:
-                        continue
-            except:
-                pass
-            
-            # Попытка 2: Закрытие cookie-баннеров
-            try:
-                cookie_banners = self.driver.find_elements(By.CSS_SELECTOR, "div.cookie-banner, div.cookie-notice")
-                for banner in cookie_banners:
-                    try:
-                        accept_btn = banner.find_element(By.CSS_SELECTOR, "button.accept-cookies, button#cookie-ok")
-                        if accept_btn.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", accept_btn)
-                            logging.info("Cookie-баннер закрыт")
-                            time.sleep(0.5)
-                    except:
-                        continue
-            except:
-                pass
-            
-            # Попытка 3: Закрытие уведомлений о новостях
-            try:
-                news_popups = self.driver.find_elements(By.CSS_SELECTOR, "div.newsletter-popup, div.promo-popup")
-                for popup in news_popups:
-                    try:
-                        close_btn = popup.find_element(By.CSS_SELECTOR, "button.close-news, button.popup-close")
-                        if close_btn.is_displayed():
-                            self.driver.execute_script("arguments[0].click();", close_btn)
-                            logging.info("Поп-ап новостей закрыт")
-                            time.sleep(0.5)
-                    except:
-                        continue
-            except:
-                pass
-            
-            # Попытка 4: Закрытие любых других всплывающих окон с кнопкой закрытия
-            try:
-                generic_popups = self.driver.find_elements(By.CSS_SELECTOR, "div.popup, div.modal, div[role='dialog']")
-                for popup in generic_popups:
-                    try:
-                        if not popup.is_displayed():
-                            continue
-                            
-                        close_btns = popup.find_elements(By.CSS_SELECTOR, "button.close, button.dismiss, [aria-label='Close']")
-                        for btn in close_btns:
-                            if btn.is_displayed():
-                                self.driver.execute_script("arguments[0].click();", btn)
-                                logging.info("Всплывающее окно закрыто")
-                                time.sleep(0.5)
-                                break
-                    except:
-                        continue
-            except:
-                pass
-            
-            # Дополнительная проверка через JavaScript
-            try:
-                # Закрытие элементов с классом 'popup' или 'overlay'
-                self.driver.execute_script("""
-                    // Скрываем всплывающие окна
-                    document.querySelectorAll('div.popup, div.overlay').forEach(el => {
-                        if (getComputedStyle(el).display !== 'none') {
-                            el.style.display = 'none';
-                        }
-                    });
-                    
-                    // Закрытие модальных окон
-                    const modals = document.querySelectorAll('div[role="dialog"]');
-                    modals.forEach(modal => {
-                        const closeBtn = modal.querySelector('button[aria-label="Close"], button.close');
-                        if (closeBtn) closeBtn.click();
-                    });
-                    
-                    // Удаление затемняющих фонов
-                    const backdrops = document.querySelectorAll('div.ant-modal-mask, div.modal-backdrop');
-                    backdrops.forEach(backdrop => {
-                        backdrop.parentNode.removeChild(backdrop);
-                    });
-                """)
-                logging.info("Проверка всплывающих окон через JavaScript выполнена")
-            except Exception as js_e:
-                logging.debug(f"Ошибка в JavaScript для закрытия окон: {js_e}")
-                
-        except Exception as e:
-            logging.warning(f"Ошибка при закрытии всплывающих окон: {e}")
-
     def login(self):
-        """Авторизация в системе с улучшенной обработкой всплывающих окон"""
+        """Авторизация в системе с улучшенной обработкой"""
         try:
             self.driver.get(urljoin(BASE_URL, 'login'))
             
-            # Ожидание полной загрузки страницы
+            # Ожидание загрузки страницы
             WebDriverWait(self.driver, MAX_WAIT).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             
-            # Закрытие всех возможных всплывающих окон
+            # Закрытие всплывающих окон
             self.close_popups()
             
             # Ввод учетных данных
@@ -205,15 +102,15 @@ class AliveWaterMonitor:
             password_field.clear()
             password_field.send_keys(PASSWORD)
             
-            # Нажатие кнопки входа
+            # Нажатие кнопки входа через JavaScript
             submit_btn = WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "button[type='submit']"))
             )
-            submit_btn.click()
+            self.driver.execute_script("arguments[0].click();", submit_btn)
             
             # Проверка успешного входа
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.dashboard-container"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.dashboard, div._container_iuuwv_1"))
             )
             logging.info("Авторизация успешна")
             return True
@@ -223,42 +120,73 @@ class AliveWaterMonitor:
             self.send_notification(f"🔴 Ошибка авторизации: {str(e)[:200]}")
             return False
 
+    def close_popups(self):
+        """Закрытие всевозможных всплывающих окон"""
+        try:
+            # Попробуем закрыть разные типы попапов
+            for _ in range(3):  # Несколько попыток
+                try:
+                    # Стандартные модальные окна
+                    popups = self.driver.find_elements(By.CSS_SELECTOR, "div.ant-modal-content")
+                    for popup in popups:
+                        try:
+                            close_btn = popup.find_element(By.CSS_SELECTOR, "button.ant-modal-close")
+                            if close_btn.is_displayed():
+                                self.driver.execute_script("arguments[0].click();", close_btn)
+                                logging.info("Модальное окно закрыто")
+                                time.sleep(1)
+                        except:
+                            continue
+                    
+                    # Куки-баннеры
+                    cookie_banners = self.driver.find_elements(By.CSS_SELECTOR, "div.cookie-banner, div.cookie-notice")
+                    for banner in cookie_banners:
+                        try:
+                            accept_btn = banner.find_element(By.CSS_SELECTOR, "button.accept-cookies, button#cookie-ok")
+                            if accept_btn.is_displayed():
+                                self.driver.execute_script("arguments[0].click();", accept_btn)
+                                logging.info("Cookie-баннер закрыт")
+                                time.sleep(0.5)
+                        except:
+                            continue
+                    
+                    # Через JavaScript на всякий случай
+                    self.driver.execute_script("""
+                        const closeElements = document.querySelectorAll(
+                            'div[aria-label="Close"], button.ant-modal-close, div.cookie-banner button'
+                        );
+                        closeElements.forEach(el => {
+                            try {
+                                if (el.offsetParent !== null) el.click();
+                            } catch(e) {}
+                        });
+                        
+                        // Удаление фонов
+                        const masks = document.querySelectorAll('div.ant-modal-mask, div.modal-backdrop');
+                        masks.forEach(mask => mask.remove());
+                    """)
+                except Exception as e:
+                    logging.debug(f"Ошибка при закрытии попапов: {e}")
+                
+                time.sleep(1)
+        except Exception as e:
+            logging.warning(f"Общая ошибка закрытия попапов: {e}")
+
     def get_payment_method(self, cell):
         """Определение метода оплаты"""
         try:
-            # Более надежный способ через aria-label
-            try:
-                svg_icon = cell.find_element(By.CSS_SELECTOR, "svg")
-                aria_label = svg_icon.get_attribute("aria-label")
-                if aria_label:
-                    return aria_label
-            except:
-                pass
+            icons = cell.find_elements(By.CSS_SELECTOR, "svg")
+            if not icons:
+                return "Неизвестно"
                 
-            # Резервный метод через title
-            try:
-                title = cell.find_element(By.CSS_SELECTOR, "svg title").text
-                if title:
-                    return title
-            except:
-                pass
-                
-            # Резервный метод через пути SVG
-            try:
-                icons = cell.find_elements(By.CSS_SELECTOR, "svg")
-                if not icons:
-                    return "Неизвестно"
-                    
-                icon_html = icons[0].get_attribute("outerHTML")
-                
-                if 'd="M336 32c-48.6 0-92.6 9-124.5 23.4' in icon_html:
-                    return "Монеты"
-                elif 'd="M528 32H48C21.5 32 0 53.5 0 80v352c0 26.5' in icon_html:
-                    return "Банковская карта"
-                elif 'd="M320 144c-53.02 0-96 50.14-96 112 0 61.85' in icon_html:
-                    return "Купюры"
-            except:
-                pass
+            icon_html = icons[0].get_attribute("outerHTML")
+            
+            if 'd="M336 32c-48.6 0-92.6 9-124.5 23.4' in icon_html:
+                return "Монеты"
+            elif 'd="M528 32H48C21.5 32 0 53.5 0 80v352c0 26.5' in icon_html:
+                return "Банковская карта"
+            elif 'd="M320 144c-53.02 0-96 50.14-96 112 0 61.85' in icon_html:
+                return "Купюры"
             
             return "Неизвестно"
         except Exception as e:
@@ -266,21 +194,17 @@ class AliveWaterMonitor:
             return "Неизвестно"
 
     def check_sales(self):
-        """Проверка новых продаж с обработкой нескольких продаж"""
+        """Проверка новых продаж с корректной обработкой"""
         try:
             self.driver.get(urljoin(BASE_URL, 'sales'))
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, "table.ant-table-tbody"))
+                EC.visibility_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
             )
             
-            # Ждем загрузки данных
-            time.sleep(3)
-            
-            # Закрытие всплывающих окон на странице продаж
+            time.sleep(3)  # Ожидание загрузки данных
             self.close_popups()
             
-            # Получаем все строки таблицы
-            rows = self.driver.find_elements(By.CSS_SELECTOR, "table.ant-table-tbody tr")
+            rows = self.driver.find_elements(By.CSS_SELECTOR, "table._table_1s08q_1 tbody tr")
             if not rows:
                 logging.info("Нет данных о продажах")
                 return
@@ -291,25 +215,26 @@ class AliveWaterMonitor:
                     cells = row.find_elements(By.TAG_NAME, "td")
                     if len(cells) < 6:
                         continue
-
+                        
+                    sale_id = cells[0].text.strip()
+                    
+                    # Если дошли до последней известной продажи - остановка
+                    if sale_id == self.state.get('last_sale_id'):
+                        break
+                        
                     sale_data = {
-                        'id': cells[0].text.strip(),
+                        'id': sale_id,
                         'address': cells[1].text.strip(),
                         'time': cells[2].text.strip(),
                         'liters': cells[3].text.strip(),
                         'total': cells[4].text.strip(),
                         'payment': self.get_payment_method(cells[5])
                     }
-                    
-                    # Проверяем новизну продажи
-                    if sale_data['id'] == self.state.get('last_sale_id'):
-                        break
-                        
                     new_sales.append(sale_data)
                 except Exception as e:
                     logging.warning(f"Ошибка обработки строки продажи: {e}")
 
-            # Обрабатываем новые продажи в обратном порядке (от старых к новым)
+            # Обработка новых продаж в обратном порядке
             for sale in reversed(new_sales):
                 self.send_notification(
                     f"💰 Новая продажа #{sale['id']}\n"
@@ -321,9 +246,9 @@ class AliveWaterMonitor:
                 )
                 logging.info(f"Обнаружена новая продажа: {sale['id']}")
 
-            # Обновляем состояние
+            # Обновление состояния
             if new_sales:
-                self.state['last_sale_id'] = new_sales[0]['id']
+                self.state['last_sale_id'] = new_sales[0]['id']  # ID самой новой продажи
                 self.save_state()
 
         except Exception as e:
@@ -331,51 +256,40 @@ class AliveWaterMonitor:
             self.send_notification(f"🔴 Ошибка проверки продаж: {str(e)[:200]}")
 
     def check_terminals(self):
-        """Проверка состояния терминалов с отслеживанием восстановления"""
+        """Проверка состояния терминалов"""
         try:
             self.driver.get(urljoin(BASE_URL, 'terminals'))
             WebDriverWait(self.driver, MAX_WAIT).until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, "table.ant-table-tbody"))
+                EC.visibility_of_element_located((By.CSS_SELECTOR, "table._table_1s08q_1"))
             )
             
-            # Ждем загрузки данных
-            time.sleep(3)
-            
-            # Закрытие всплывающих окон на странице терминалов
+            time.sleep(3)  # Ожидание загрузки данных
             self.close_popups()
             
-            # Собираем текущее состояние
             current_problems = {}
-            rows = self.driver.find_elements(By.CSS_SELECTOR, "table.ant-table-tbody tr")
+            rows = self.driver.find_elements(By.CSS_SELECTOR, "tr._hasProblem_1gunj_20")
             
-            for row in rows:
+            for terminal in rows:
                 try:
-                    name_cell = row.find_element(By.CSS_SELECTOR, "td:nth-child(2)")
-                    name = name_cell.text.strip()
-                    
-                    # Проверяем наличие ошибок
-                    error_icons = row.find_elements(By.CSS_SELECTOR, "span.ant-badge-status-error, span.status-error")
-                    if error_icons:
-                        current_problems[name] = {
-                            'count': len(error_icons),
-                            'timestamp': datetime.now().isoformat()
-                        }
+                    name = terminal.find_element(By.CSS_SELECTOR, "td:nth-child(2)").text.strip()
+                    error_count = len(terminal.find_elements(By.CSS_SELECTOR, "span._error_irtpv_12"))
+                    current_problems[name] = error_count
                 except Exception as e:
-                    logging.warning(f"Ошибка обработки терминала: {e}")
+                    logging.error(f"Ошибка обработки терминала: {e}")
 
-            # Проверяем изменения состояния
+            # Проверка изменений состояния
             last_problems = self.state.get('last_problems', {})
             
-            # Проверяем новые проблемы
-            for name, data in current_problems.items():
-                if name not in last_problems:
+            # Новые проблемы
+            for name, count in current_problems.items():
+                if name not in last_problems or last_problems[name] < count:
                     self.send_notification(
                         f"⚠️ Проблема с терминалом: {name}\n"
-                        f"🔴 Количество ошибок: {data['count']}\n"
+                        f"🔴 Количество ошибок: {count}\n"
                         f"🔗 Ссылка: {urljoin(BASE_URL, 'terminals')}"
                     )
             
-            # Проверяем восстановленные терминалы
+            # Восстановленные терминалы
             for name in list(last_problems.keys()):
                 if name not in current_problems:
                     self.send_notification(
@@ -384,16 +298,16 @@ class AliveWaterMonitor:
                         f"🔗 Ссылка: {urljoin(BASE_URL, 'terminals')}"
                     )
             
-            # Обновляем состояние
+            # Обновление состояния
             self.state['last_problems'] = current_problems
             self.save_state()
-            
+                    
         except Exception as e:
             logging.error(f"Ошибка проверки терминалов: {e}")
             self.send_notification("🔴 Не удалось проверить состояние терминалов")
 
     def send_notification(self, message):
-        """Отправка уведомления с обработкой ошибок"""
+        """Отправка уведомления"""
         try:
             bot.send_message(CHAT_ID, message)
             logging.info(f"Уведомление отправлено: {message[:50]}...")
@@ -402,9 +316,9 @@ class AliveWaterMonitor:
 
     def run_monitoring(self):
         """Основной цикл мониторинга"""
-        logging.info("Запуск мониторинга AliveWater")
+        logging.info("Запуск постоянного мониторинга AliveWater")
         
-        while True:
+        while self.is_running:
             try:
                 # Переинициализация драйвера при необходимости
                 if not self.driver:
@@ -440,18 +354,24 @@ class AliveWaterMonitor:
                     except:
                         pass
                     self.driver = None
-                
-                time.sleep(60)
+                    time.sleep(10)
 
-    def __del__(self):
-        """Очистка ресурсов при завершении"""
+    def stop(self):
+        """Остановка мониторинга"""
+        self.is_running = False
         if self.driver:
             try:
                 self.driver.quit()
-                logging.info("Драйвер закрыт")
             except:
                 pass
 
 if __name__ == '__main__':
     monitor = AliveWaterMonitor()
-    monitor.run_monitoring()
+    try:
+        monitor.run_monitoring()
+    except KeyboardInterrupt:
+        monitor.stop()
+        logging.info("Мониторинг остановлен по запросу пользователя")
+    except Exception as e:
+        monitor.stop()
+        logging.error(f"Необработанное исключение: {e}")
