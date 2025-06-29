@@ -326,12 +326,17 @@ def handle_stop(message):
 if __name__ == '__main__':
     monitor = AliveWaterMonitor()
     
-    # Запускаем бота в отдельном потоке
-    from threading import Thread
-    bot_thread = Thread(target=bot.polling, kwargs={'none_stop': True})
-    bot_thread.start()
+    # Остановить любые предыдущие экземпляры бота
+    bot.remove_webhook()
+    time.sleep(1)
     
-    # Запускаем мониторинг
-    while True:
-        monitor.run()
-        time.sleep(60 * 5)  # Проверка каждые 5 минут
+    try:
+        # Запускаем мониторинг в основном потоке
+        while True:
+            monitor.run()
+            time.sleep(60 * 5)  # Проверка каждые 5 минут
+    except KeyboardInterrupt:
+        print("\nБот остановлен")
+    finally:
+        if monitor.driver:
+            monitor.driver.quit()
