@@ -22,12 +22,12 @@ logging.basicConfig(
 
 # Конфигурация
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-CHAT_ID = os.getenv('CHAT_ID')
 BASE_URL = 'https://my.alivewater.cloud/'
 LOGIN = os.getenv('LOGIN')
 PASSWORD = os.getenv('PASSWORD')
 MAX_WAIT = 30
 DATA_FILE = 'water_monitor_state.json'
+SUBSCRIBERS_FILE = 'subscribers.json'  # Файл для хранения подписчиков
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -35,6 +35,7 @@ class AliveWaterMonitor:
     def __init__(self):
         self.driver = None
         self.state = self.load_state()
+        self.subscribers = self.load_subscribers()  # Загружаем список подписчиков
         self.setup_driver()
 
     def load_state(self):
@@ -42,7 +43,6 @@ class AliveWaterMonitor:
         try:
             with open(DATA_FILE, 'r') as f:
                 state = json.load(f)
-                # Проверяем структуру файла
                 if 'last_processed_sale' not in state:
                     state['last_processed_sale'] = None
                 if 'last_problems' not in state:
@@ -52,15 +52,28 @@ class AliveWaterMonitor:
                 return state
         except (FileNotFoundError, json.JSONDecodeError):
             return {
-                'last_processed_sale': None,  # Теперь храним только номер последней обработанной продажи
+                'last_processed_sale': None,
                 'last_problems': {},
                 'last_check': None
             }
+
+    def load_subscribers(self):
+        """Загрузка списка подписчиков"""
+        try:
+            with open(SUBSCRIBERS_FILE, 'r') as f:
+                return json.load(f).get('subscribers', [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
 
     def save_state(self):
         """Сохранение состояния в файл"""
         with open(DATA_FILE, 'w') as f:
             json.dump(self.state, f, indent=2)
+
+    def save_subscribers(self):
+        """Сохранение списка подписчиков"""
+        with open(SUBSCRIBERS_FILE, 'w') as f:
+            json.dump({'subscribers': self.subscribers}, f, indent=2)
 
     def setup_driver(self):
         """Настройка Chrome WebDriver"""
@@ -158,7 +171,6 @@ class AliveWaterMonitor:
                 logging.info("Нет данных о продажах")
                 return
 
-            # Собираем все продажи на странице
             all_sales = []
             for row in rows:
                 try:
@@ -181,15 +193,12 @@ class AliveWaterMonitor:
                 logging.info("Не удалось получить данные о продажах")
                 return
 
-            # Определяем новые продажи
             if self.state['last_processed_sale'] is None:
-                # Первый запуск - запоминаем последнюю продажу, но не отправляем уведомления
                 self.state['last_processed_sale'] = all_sales[0]['number']
                 self.save_state()
                 logging.info(f"Первая инициализация. Запомнена продажа #{self.state['last_processed_sale']}")
                 return
             
-            # Находим индекс последней обработанной продажи
             last_processed_index = -1
             for i, sale in enumerate(all_sales):
                 if sale['number'] == self.state['last_processed_sale']:
@@ -197,19 +206,14 @@ class AliveWaterMonitor:
                     break
             
             if last_processed_index == -1:
-                # Не нашли последнюю обработанную продажу - возможно, список обновился полностью
-                # Отправляем все продажи, кроме самой последней (чтобы не дублировать)
                 new_sales = all_sales[:-1]
             else:
-                # Все продажи перед last_processed_index - новые
                 new_sales = all_sales[:last_processed_index]
             
-            # Отправляем уведомления о новых продажах в хронологическом порядке (от старых к новым)
             for sale in reversed(new_sales):
                 self.send_sale_notification(sale)
-                time.sleep(1)  # Небольшая задержка между уведомлениями
+                time.sleep(1)
             
-            # Обновляем статус только если были новые продажи
             if new_sales:
                 self.state['last_processed_sale'] = all_sales[0]['number']
                 self.save_state()
@@ -218,19 +222,6 @@ class AliveWaterMonitor:
         except Exception as e:
             logging.error(f"Ошибка проверки продаж: {e}")
             self.send_notification(f"🔴 Ошибка проверки продаж: {str(e)[:200]}")
-
-    def send_sale_notification(self, sale_data):
-        """Отправка уведомления о продаже"""
-        message = (
-            f"💰 Новая продажа #{sale_data['number']}\n"
-            f"🏠 Адрес: {sale_data['address']}\n"
-            f"⏰ Время: {sale_data['time']}\n"
-            f"⚖️ Объем: {sale_data['liters']}\n"
-            f"💵 Сумма: {sale_data['total']}\n"
-            f"💳 Способ оплаты: {sale_data['payment']}"
-        )
-        self.send_notification(message)
-        logging.info(f"Отправлено уведомление о продаже #{sale_data['number']}")
 
     def check_terminals(self):
         """Проверка состояния терминалов"""
@@ -265,13 +256,31 @@ class AliveWaterMonitor:
             logging.error(f"Ошибка проверки терминалов: {e}")
             self.send_notification("🔴 Не удалось проверить состояние терминалов")
 
+    def send_sale_notification(self, sale_data):
+        """Отправка уведомления о продаже"""
+        message = (
+            f"💰 Новая продажа #{sale_data['number']}\n"
+            f"🏠 Адрес: {sale_data['address']}\n"
+            f"⏰ Время: {sale_data['time']}\n"
+            f"⚖️ Объем: {sale_data['liters']}\n"
+            f"💵 Сумма: {sale_data['total']}\n"
+            f"💳 Способ оплаты: {sale_data['payment']}"
+        )
+        self.send_notification(message)
+        logging.info(f"Отправлено уведомление о продаже #{sale_data['number']}")
+
     def send_notification(self, message):
-        """Отправка уведомления"""
-        try:
-            bot.send_message(CHAT_ID, message)
-            logging.info(f"Уведомление отправлено: {message[:50]}...")
-        except Exception as e:
-            logging.error(f"Ошибка отправки уведомления: {e}")
+        """Отправка уведомления всем подписчикам"""
+        for chat_id in self.subscribers:
+            try:
+                bot.send_message(chat_id, message)
+                logging.info(f"Уведомление отправлено в {chat_id}: {message[:50]}...")
+            except Exception as e:
+                logging.error(f"Ошибка отправки в {chat_id}: {e}")
+                # Удаляем неактивных подписчиков
+                if "chat not found" in str(e).lower() or "user is deactivated" in str(e).lower():
+                    self.subscribers.remove(chat_id)
+                    self.save_subscribers()
 
     def run(self):
         """Основной цикл мониторинга"""
@@ -292,6 +301,37 @@ class AliveWaterMonitor:
                 self.driver.quit()
                 logging.info("Драйвер закрыт")
 
+# Обработчик команды /start для подписки
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    chat_id = message.chat.id
+    if chat_id not in monitor.subscribers:
+        monitor.subscribers.append(chat_id)
+        monitor.save_subscribers()
+        bot.reply_to(message, "✅ Вы успешно подписались на уведомления!")
+    else:
+        bot.reply_to(message, "ℹ️ Вы уже подписаны на уведомления.")
+
+# Обработчик команды /stop для отписки
+@bot.message_handler(commands=['stop'])
+def handle_stop(message):
+    chat_id = message.chat.id
+    if chat_id in monitor.subscribers:
+        monitor.subscribers.remove(chat_id)
+        monitor.save_subscribers()
+        bot.reply_to(message, "✅ Вы отписались от уведомлений.")
+    else:
+        bot.reply_to(message, "ℹ️ Вы не были подписаны на уведомления.")
+
 if __name__ == '__main__':
     monitor = AliveWaterMonitor()
-    monitor.run()
+    
+    # Запускаем бота в отдельном потоке
+    from threading import Thread
+    bot_thread = Thread(target=bot.polling, kwargs={'none_stop': True})
+    bot_thread.start()
+    
+    # Запускаем мониторинг
+    while True:
+        monitor.run()
+        time.sleep(60 * 5)  # Проверка каждые 5 минут
